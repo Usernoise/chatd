@@ -199,8 +199,8 @@ def generate_music_with_suno(song_data):
         
         if response.status_code == 200:
             result = response.json()
-            if result.get('code') == 200 and result.get('data', {}).get('id'):
-                task_id = result['data']['id']
+            if result.get('code') == 200 and result.get('data', {}).get('taskId'):
+                task_id = result['data']['taskId']
                 logger.info(f"Задача создания музыки отправлена, task_id: {task_id}")
                 return {
                     'task_id': task_id,
@@ -280,6 +280,8 @@ def wait_for_suno_completion(task_id, max_wait_time=180):
     
     logger.warning("Время ожидания истекло")
     return None
+
+
 
 def format_song_message(song_data):
     """
