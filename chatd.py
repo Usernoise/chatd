@@ -40,21 +40,12 @@ except ImportError as e:
 
 # Импортируем анализатор директора
 try:
-    from director_analyzer import analyze_director
+    from director_analyzer import analyze_director_and_gift, format_gift_message
     DIRECTOR_ANALYZER_AVAILABLE = True
     logger.info("Анализатор директора подключен")
 except ImportError as e:
     DIRECTOR_ANALYZER_AVAILABLE = False
     logger.warning(f"Анализатор директора недоступен: {e}")
-
-# Импортируем генератор подарков
-try:
-    from gift_generator import generate_director_gift, generate_gift_photo_prompt
-    GIFT_GENERATOR_AVAILABLE = True
-    logger.info("Генератор подарков подключен")
-except ImportError as e:
-    GIFT_GENERATOR_AVAILABLE = False
-    logger.warning(f"Генератор подарков недоступен: {e}")
 
 message_store = {}
 chat_threads = {}
@@ -130,7 +121,7 @@ def get_main_keyboard():
         ["📋 Итоги дня", "🏆 Топ дня"],
         ["❓ Вопрос", "📅 Топ недели"],
         ["🤔 Че у вас тут происходит"],
-        ["👔 Директор чата"]
+        ["🎁 Подарок директору"]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -150,7 +141,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '📋 Итоги дня - суммаризация за сегодня\n'
         '🏆 Топ дня - рейтинг участников\n'
         '❓ Вопрос - задать вопрос ChatGPT\n'
-        '👔 Директор чата - подарок для директора\n'
+        '🎁 Подарок директору - подарок для директора чата\n'
         '📊 Статистика - информация о чате\n\n'
         '⌨️ **Команды:**\n'
         '/sum - итоги дня\n'
@@ -480,7 +471,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if message.text and not message.via_bot:
         # Проверяем кнопки клавиатуры
-        if message.text in ["📋 Итоги дня", "🏆 Топ дня", "❓ Вопрос", "📊 Статистика", "🤔 Че у вас тут происходит", "👔 Директор чата"]:
+        if message.text in ["📋 Итоги дня", "🏆 Топ дня", "❓ Вопрос", "📊 Статистика", "🤔 Че у вас тут происходит", "🎁 Подарок директору"]:
             await handle_keyboard_buttons(update, context)
             return
             
@@ -661,17 +652,17 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
         top_summary = await get_top_summary(7, chat_id)
         await safe_send_message(update, f"📅 <b>Топ участников недели:</b>\n\n{top_summary}")
         
-    elif text == "Че у вас здесь происходит?":
+    elif text == "🤔 Че у вас тут происходит":
         summary = await get_summary_last_hours(2, chat_id)
         await safe_send_message(update, f"🤔 <b>Что происходило последние 2 часа:</b>\n\n{summary}")
         
-    elif text == "👔 Директор чата":
+    elif text == "🎁 Подарок директору":
         await handle_director_gift(update, context)
 
 async def handle_director_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик генерации подарка для директора чата"""
-    if not DIRECTOR_ANALYZER_AVAILABLE or not GIFT_GENERATOR_AVAILABLE:
-        await update.message.reply_text("❌ Генератор подарков недоступен")
+    if not DIRECTOR_ANALYZER_AVAILABLE:
+        await update.message.reply_text("❌ Анализатор директора недоступен")
         return
     
     chat_id = str(update.message.chat_id)
@@ -683,21 +674,17 @@ async def handle_director_gift(update: Update, context: ContextTypes.DEFAULT_TYP
         # Анализируем директора в отдельном потоке
         import asyncio
         loop = asyncio.get_event_loop()
-        analysis, director_name = await loop.run_in_executor(None, analyze_director, message_store, chat_id)
+        analysis_result = await loop.run_in_executor(None, analyze_director_and_gift, message_store, chat_id)
         
-        if analysis and director_name:
-            # Генерируем подарок
-            gift_description = await loop.run_in_executor(None, generate_director_gift, analysis)
+        if analysis_result:
+            # Форматируем сообщение с подарком
+            gift_message = format_gift_message(analysis_result)
+            await safe_send_message(update, gift_message)
             
-            if gift_description:
-                # Отправляем описание подарка
-                await safe_send_message(update, f"🎁 <b>ПОДАРОК ДЛЯ ДИРЕКТОРА ЧАТА</b>\n\n{gift_description}")
-                
-                # Генерируем промпт для фото подарка
-                photo_prompt = await loop.run_in_executor(None, generate_gift_photo_prompt, gift_description)
-                
-                if photo_prompt and PHOTO_GENERATOR_API_AVAILABLE:
-                    # Генерируем фото подарка
+            # Генерируем фото подарка если доступен генератор фото
+            if PHOTO_GENERATOR_API_AVAILABLE and analysis_result.get('gift_photo_prompt'):
+                try:
+                    photo_prompt = analysis_result['gift_photo_prompt']
                     photo_path = await loop.run_in_executor(None, generate_photo, photo_prompt)
                     
                     if photo_path and os.path.exists(photo_path):
@@ -705,7 +692,7 @@ async def handle_director_gift(update: Update, context: ContextTypes.DEFAULT_TYP
                         with open(photo_path, 'rb') as photo:
                             await update.message.reply_photo(
                                 photo=photo,
-                                caption=f"📸 <b>ФОТО ПОДАРКА ДЛЯ: {director_name}</b> 📸",
+                                caption=f"📸 <b>ФОТО ПОДАРКА ДЛЯ: {analysis_result['director_name']}</b> 📸",
                                 parse_mode='HTML'
                             )
                         
@@ -717,12 +704,11 @@ async def handle_director_gift(update: Update, context: ContextTypes.DEFAULT_TYP
                             logger.warning(f"Не удалось удалить временный файл {photo_path}: {e}")
                     else:
                         await update.message.reply_text("❌ Не удалось сгенерировать фото подарка.")
-                else:
-                    await update.message.reply_text("❌ Не удалось создать промпт для фото подарка.")
+                        
+                except Exception as e:
+                    logger.error(f"Ошибка генерации фото подарка: {e}")
+                    await update.message.reply_text("❌ Ошибка при генерации фото подарка.")
                     
-            else:
-                await update.message.reply_text("❌ Не удалось создать подарок для директора.")
-                
         else:
             await update.message.reply_text("❌ Не удалось проанализировать директора чата. Возможно, недостаточно сообщений за последние 24 часа.")
             
