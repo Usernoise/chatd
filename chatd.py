@@ -210,7 +210,7 @@ async def get_summary_for_date(date_str, chat_id):
     """Получение суммаризации за конкретную дату"""
     messages = get_messages_for_date(date_str, chat_id)
     if messages is None:
-        return "❌ Неправильный формат даты. Используйте: YYYY-MM-DD (например: 2024-07-20)"
+        return "❌ Неправильный  формат даты. Используйте: YYYY-MM-DD (например: 2024-07-20)"
     if not messages:
         return f"Нет сообщений за {date_str}."
     
