@@ -8,7 +8,7 @@ import uuid
 import json
 import os
 import asyncio
-from prompts import SUMMARY_PROMPT, TOP_SUMMARY_PROMPT, CHATGPT_PROMPT
+from prompts import SUMMARY_PROMPT, TOP_SUMMARY_PROMPT, CHATGPT_PROMPT, RECENT_SUMMARY_PROMPT
 from config import TELEGRAM_BOT_TOKEN, OPENAI_API_KEY, MESSAGE_STORE_FILE, MOSCOW_TIMEZONE
 import requests
 import tempfile
@@ -240,7 +240,7 @@ async def get_summary_last_hours(hours, chat_id):
         response = await client.chat.completions.create(
             model="gpt-4.1-mini",
             messages=[
-                {"role": "system", "content": SUMMARY_PROMPT},
+                {"role": "system", "content": RECENT_SUMMARY_PROMPT},
                 {"role": "user", "content": f"Вот сообщения чата за последние {hours} часов:\n\n{messages}"}
             ],
             temperature=0.8,
