@@ -101,7 +101,8 @@ def get_main_keyboard():
     """Создание основной клавиатуры с кнопками"""
     keyboard = [
         ["📋 Итоги дня", "🏆 Топ дня"],
-        ["❓ Вопрос", "📅 Топ недели"]
+        ["❓ Вопрос", "📅 Топ недели"],
+        ["🤔 Че у вас тут происходит"]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -229,6 +230,27 @@ async def get_summary_for_date(date_str, chat_id):
         logger.error(f"Ошибка при вызове OpenAI API: {e}")
         return "Произошла ошибка при создании суммаризации. Попробуйте позже."
 
+async def get_summary_last_hours(hours, chat_id):
+    """Получение суммаризации за последние N часов"""
+    messages = get_messages_last_hours(hours, chat_id)
+    if not messages:
+        return f"Нет сообщений за последние {hours} часов."
+    
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[
+                {"role": "system", "content": SUMMARY_PROMPT},
+                {"role": "user", "content": f"Вот сообщения чата за последние {hours} часов:\n\n{messages}"}
+            ],
+            temperature=0.8,
+            max_tokens=2000
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        logger.error(f"Ошибка при вызове OpenAI API: {e}")
+        return "Произошла ошибка при создании суммаризации. Попробуйте позже."
+
 async def get_top_summary(days, chat_id):
     """Получение топа участников"""
     messages = get_messages(days, chat_id)
@@ -323,6 +345,26 @@ def get_messages_for_date(date_str, chat_id):
     except ValueError:
         return None
 
+def get_messages_last_hours(hours, chat_id):
+    """Получение сообщений за последние N часов"""
+    current_time = get_current_time()
+    chat_id = str(chat_id)
+    
+    if chat_id not in message_store:
+        return ""
+    
+    # Время начала: текущее время минус N часов
+    start_time = current_time - timedelta(hours=hours)
+    end_time = current_time
+    
+    relevant_messages = [
+        f"{msg['sender']}: {msg['text']}"
+        for msg in message_store[chat_id].values()
+        if start_time <= msg['timestamp'] <= end_time
+    ]
+    
+    return "\n".join(relevant_messages)
+
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка обычных сообщений и голосовых"""
     message = update.message
@@ -330,7 +372,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if message.text and not message.via_bot:
         # Проверяем кнопки клавиатуры
-        if message.text in ["📋 Итоги дня", "🏆 Топ дня", "❓ Вопрос", "📊 Статистика"]:
+        if message.text in ["📋 Итоги дня", "🏆 Топ дня", "❓ Вопрос", "📊 Статистика", "🤔 Че у вас тут происходит"]:
             await handle_keyboard_buttons(update, context)
             return
             
@@ -510,6 +552,10 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
     elif text == "📅 Топ недели":
         top_summary = await get_top_summary(7, chat_id)
         await safe_send_message(update, f"📅 <b>Топ участников недели:</b>\n\n{top_summary}")
+        
+    elif text == "🤔 Че у вас тут происходит":
+        summary = await get_summary_last_hours(2, chat_id)
+        await safe_send_message(update, f"🤔 <b>Что происходило последние 2 часа:</b>\n\n{summary}")
 
 async def send_daily_reports(context: ContextTypes.DEFAULT_TYPE):
     """Отправка ежедневных отчетов"""
@@ -522,20 +568,11 @@ async def send_daily_reports(context: ContextTypes.DEFAULT_TYPE):
             if not messages_today.strip():
                 continue
                 
-            summary = await get_summary(1, chat_id)
             top_summary = await get_top_summary(1, chat_id)
             
             await context.bot.send_message(
                 chat_id=int(chat_id), 
-                text=f"📋 <b>Итоги дня:</b>\n\n{summary}",
-                parse_mode='HTML'
-            )
-            
-            await asyncio.sleep(2)  # Пауза между сообщениями
-            
-            await context.bot.send_message(
-                chat_id=int(chat_id), 
-                text=f"🏆 <b>Топ участников:</b>\n\n{top_summary}",
+                text=f"🏆 <b>Топ участников дня:</b>\n\n{top_summary}",
                 parse_mode='HTML'
             )
             
