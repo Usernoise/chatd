@@ -23,8 +23,7 @@ except ImportError:
 
 # Инициализируем OpenAI клиента
 if openai_api_key:
-    openai.api_key = openai_api_key
-    openai_client = openai
+    openai_client = openai.OpenAI(api_key=openai_api_key)
 else:
     openai_client = None
     logger.warning("OpenAI API ключ не найден")
@@ -72,8 +71,8 @@ def analyze_chat_and_generate_song(message_store, chat_id):
             logger.warning("Нет сообщений за последние 24 часа")
             return None
         
-        response = openai_client.ChatCompletion.create(
-            model="gpt-4.1-mini",
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
             messages=[
                 {
                     "role": "system",
