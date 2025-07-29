@@ -47,6 +47,15 @@ except ImportError as e:
     DIRECTOR_ANALYZER_AVAILABLE = False
     logger.warning(f"Анализатор директора недоступен: {e}")
 
+# Импортируем генератор песен
+try:
+    from song_generator import analyze_chat_and_generate_song, format_song_message, generate_music_with_suno
+    SONG_GENERATOR_AVAILABLE = True
+    logger.info("Генератор песен подключен")
+except ImportError as e:
+    SONG_GENERATOR_AVAILABLE = False
+    logger.warning(f"Генератор песен недоступен: {e}")
+
 message_store = {}
 chat_threads = {}
 
@@ -121,7 +130,8 @@ def get_main_keyboard():
         ["📋 Итоги дня", "🏆 Топ дня"],
         ["❓ Вопрос", "📅 Топ недели"],
         ["🤔 Че у вас тут происходит"],
-        ["🎁 Подарок директору"]
+        ["🎁 Подарок директору"],
+        ["🎵 Песня дня"]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -142,6 +152,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '🏆 Топ дня - рейтинг участников\n'
         '❓ Вопрос - задать вопрос ChatGPT\n'
         '🎁 Подарок директору - подарок для директора чата\n'
+        '🎵 Песня дня - песня на основе событий чата\n'
         '📊 Статистика - информация о чате\n\n'
         '⌨️ **Команды:**\n'
         '/sum - итоги дня\n'
@@ -151,6 +162,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '/topdate YYYY-MM-DD - топ участников за дату\n'
         '/q <текст> - вопрос ChatGPT\n'
         '/photo <промпт> - генерация фото\n'
+        '/check_song <task_id> - проверка статуса песни\n'
         '/debug - информация о чате\n\n'
         '💡 **Примеры:**\n'
         '/date 2024-07-20\n'
@@ -287,16 +299,24 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_summary(days, chat_id):
     """Получение суммаризации сообщений"""
-    messages = get_messages(days, chat_id)
+    if days == 1:
+        # Для кнопки "Итоги дня" используем сообщения за последние 24 часа
+        messages = get_messages_last_hours(24, chat_id)
+        period_text = "последние 24 часа"
+    else:
+        # Для остальных случаев используем обычную логику
+        messages = get_messages(days, chat_id)
+        period_text = f"{'день' if days == 1 else f'{days} дней'}"
+    
     if not messages:
-        return f"Нет сообщений для суммаризации за {'день' if days == 1 else f'{days} дней'}."
+        return f"Нет сообщений для суммаризации за {period_text}."
     
     try:
         response = await client.chat.completions.create(
             model="gpt-4.1-mini",
             messages=[
                 {"role": "system", "content": SUMMARY_PROMPT},
-                {"role": "user", "content": f"Вот сообщения чата за {'день' if days == 1 else f'{days} дней'}:\n\n{messages}"}
+                {"role": "user", "content": f"Вот сообщения чата за {period_text}:\n\n{messages}"}
             ],
             temperature=0.8,
             max_tokens=2500
@@ -352,16 +372,24 @@ async def get_summary_last_hours(hours, chat_id):
 
 async def get_top_summary(days, chat_id):
     """Получение топа участников"""
-    messages = get_messages(days, chat_id)
+    if days == 1:
+        # Для кнопки "Топ дня" используем сообщения за последние 24 часа
+        messages = get_messages_last_hours(24, chat_id)
+        period_text = "последние 24 часа"
+    else:
+        # Для остальных случаев используем обычную логику
+        messages = get_messages(days, chat_id)
+        period_text = f"{'день' if days == 1 else f'{days} дней'}"
+    
     if not messages:
-        return f"Нет сообщений за {'день' if days == 1 else f'{days} дней'}."
+        return f"Нет сообщений за {period_text}."
     
     try:
         response = await client.chat.completions.create(
             model="gpt-4.1-mini",
             messages=[
                 {"role": "system", "content": TOP_SUMMARY_PROMPT},
-                {"role": "user", "content": f"Вот сообщения чата за {'день' if days == 1 else f'{days} дней'}:\n\n{messages}"}
+                {"role": "user", "content": f"Вот сообщения чата за {period_text}:\n\n{messages}"}
             ],
             temperature=0.7,
             max_tokens=2000
@@ -369,7 +397,7 @@ async def get_top_summary(days, chat_id):
         return response.choices[0].message.content
     except Exception as e:
         logger.error(f"Ошибка при вызове OpenAI API: {e}")
-        return f"Произошла ошибка при создании топа участников за {'день' if days == 1 else f'{days} дней'}."
+        return f"Произошла ошибка при создании топа участников за {period_text}."
 
 async def get_top_summary_for_date(date_str, chat_id):
     """Получение топа участников за конкретную дату"""
@@ -471,7 +499,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if message.text and not message.via_bot:
         # Проверяем кнопки клавиатуры
-        if message.text in ["📋 Итоги дня", "🏆 Топ дня", "❓ Вопрос", "📊 Статистика", "🤔 Че у вас тут происходит", "🎁 Подарок директору"]:
+        if message.text in ["📋 Итоги дня", "🏆 Топ дня", "❓ Вопрос", "📊 Статистика", "🤔 Че у вас тут происходит", "🎁 Подарок директору", "🎵 Песня дня"]:
             await handle_keyboard_buttons(update, context)
             return
             
@@ -631,11 +659,11 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
     
     if text == "📋 Итоги дня":
         summary = await get_summary(1, chat_id)
-        await safe_send_message(update, f"📋 <b>Итоги дня:</b>\n\n{summary}")
+        await safe_send_message(update, f"📋 <b>Итоги за последние 24 часа:</b>\n\n{summary}")
         
     elif text == "🏆 Топ дня":
         top_summary = await get_top_summary(1, chat_id)
-        await safe_send_message(update, f"🏆 <b>Топ участников дня:</b>\n\n{top_summary}")
+        await safe_send_message(update, f"🏆 <b>Топ участников за последние 24 часа:</b>\n\n{top_summary}")
         
         # Генерируем и отправляем фото директора
         await send_director_photo(update, context, top_summary)
@@ -658,6 +686,9 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
         
     elif text == "🎁 Подарок директору":
         await handle_director_gift(update, context)
+        
+    elif text == "🎵 Песня дня":
+        await handle_song_generation(update, context)
 
 async def handle_director_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик генерации подарка для директора чата"""
@@ -722,6 +753,247 @@ async def handle_director_gift(update: Update, context: ContextTypes.DEFAULT_TYP
         except:
             pass
 
+async def handle_song_generation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик генерации песни дня"""
+    if not SONG_GENERATOR_AVAILABLE:
+        await update.message.reply_text("❌ Генератор песен недоступен")
+        return
+    
+    chat_id = str(update.message.chat_id)
+    
+    # Отправляем сообщение о начале генерации
+    status_message = await update.message.reply_text("🎵 Анализирую чат и создаю песню...")
+    
+    try:
+        # Анализируем чат и создаем песню в отдельном потоке
+        import asyncio
+        loop = asyncio.get_event_loop()
+        song_data = await loop.run_in_executor(None, analyze_chat_and_generate_song, message_store, chat_id)
+        
+        if song_data:
+            # Отправляем описание песни
+            song_message = format_song_message(song_data)
+            await safe_send_message(update, song_message)
+            
+            # Генерируем музыку через Suno API если доступен
+            if song_data.get('lyrics'):
+                try:
+                    await asyncio.sleep(1)  # Пауза перед генерацией музыки
+                    await update.message.reply_text("🎼 Отправляю запрос на генерацию музыки...")
+                    
+                    suno_result = await loop.run_in_executor(None, generate_music_with_suno, song_data)
+                    
+                    if suno_result and suno_result.get('task_id'):
+                        task_id = suno_result['task_id']
+                        song_info = suno_result['song_data']
+                        
+                        # Отправляем информацию о начале генерации
+                        await update.message.reply_text(
+                            f"🎵 <b>Музыка создается!</b>\n\n"
+                            f"Название: <b>{song_info['song_title']}</b>\n"
+                            f"Жанр: <b>{song_info['genre']}</b>\n"
+                            f"Настроение: <b>{song_info['mood']}</b>\n\n"
+                            f"⏳ Генерация займет 2-3 минуты.\n"
+                            f"Я автоматически отправлю готовую музыку в чат!",
+                            parse_mode='HTML'
+                        )
+                        
+                        # Сохраняем информацию о задаче для последующей проверки
+                        if 'song_tasks' not in context.bot_data:
+                            context.bot_data['song_tasks'] = {}
+                        
+                        context.bot_data['song_tasks'][task_id] = {
+                            'chat_id': chat_id,
+                            'song_data': song_info,
+                            'timestamp': datetime.now()
+                        }
+                        
+                        # Запускаем автоматическую проверку через 3 минуты
+                        context.job_queue.run_once(
+                            check_song_automatically, 
+                            180,  # 3 минуты = 180 секунд
+                            data={'task_id': task_id, 'chat_id': chat_id}
+                        )
+                        
+                    else:
+                        await update.message.reply_text("❌ Не удалось отправить запрос на генерацию музыки.")
+                        
+                except Exception as e:
+                    logger.error(f"Ошибка генерации музыки: {e}")
+                    await update.message.reply_text("❌ Ошибка при генерации музыки.")
+                    
+        else:
+            await update.message.reply_text("❌ Не удалось создать песню. Возможно, недостаточно сообщений за последние 24 часа.")
+            
+    except Exception as e:
+        logger.error(f"Ошибка генерации песни: {e}")
+        await update.message.reply_text("❌ Произошла ошибка при создании песни. Попробуйте позже.")
+    finally:
+        # Удаляем сообщение о статусе
+        try:
+            await status_message.delete()
+        except:
+            pass
+
+async def check_song_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /check_song для проверки статуса генерации песни"""
+    if not SONG_GENERATOR_AVAILABLE:
+        await update.message.reply_text("❌ Генератор песен недоступен")
+        return
+    
+    if not context.args:
+        await update.message.reply_text(
+            "🎵 Укажите ID задачи для проверки статуса\n\n"
+            "Пример: <code>/check_song task_id</code>",
+            parse_mode='HTML'
+        )
+        return
+    
+    task_id = context.args[0]
+    
+    try:
+        # Проверяем статус в отдельном потоке
+        import asyncio
+        loop = asyncio.get_event_loop()
+        
+        # Импортируем функцию проверки статуса
+        from song_generator import check_suno_task_status
+        
+        status_result = await loop.run_in_executor(None, check_suno_task_status, task_id)
+        
+        if status_result:
+            status = status_result.get('status', 'unknown')
+            
+            if status == 'complete':
+                # Музыка готова
+                audio_urls = status_result.get('audio_urls', [])
+                if audio_urls:
+                    await update.message.reply_text(
+                        f"🎵 <b>Музыка готова!</b>\n\n"
+                        f"Статус: <b>{status}</b>\n"
+                        f"Ссылки на аудио:\n"
+                        f"{chr(10).join([f'• {url}' for url in audio_urls])}",
+                        parse_mode='HTML'
+                    )
+                else:
+                    await update.message.reply_text(
+                        f"🎵 <b>Музыка готова!</b>\n\n"
+                        f"Статус: <b>{status}</b>\n"
+                        f"Но ссылки на аудио не найдены.",
+                        parse_mode='HTML'
+                    )
+            elif status == 'processing':
+                await update.message.reply_text(
+                    f"⏳ <b>Музыка создается...</b>\n\n"
+                    f"Статус: <b>{status}</b>\n"
+                    f"Попробуйте проверить еще раз через минуту.",
+                    parse_mode='HTML'
+                )
+            elif status == 'failed':
+                await update.message.reply_text(
+                    f"❌ <b>Ошибка генерации</b>\n\n"
+                    f"Статус: <b>{status}</b>\n"
+                    f"Попробуйте создать песню заново.",
+                    parse_mode='HTML'
+                )
+            else:
+                await update.message.reply_text(
+                    f"❓ <b>Неизвестный статус</b>\n\n"
+                    f"Статус: <b>{status}</b>\n"
+                    f"Попробуйте проверить позже.",
+                    parse_mode='HTML'
+                )
+        else:
+            await update.message.reply_text("❌ Не удалось получить статус задачи.")
+            
+    except Exception as e:
+        logger.error(f"Ошибка проверки статуса песни: {e}")
+        await update.message.reply_text("❌ Произошла ошибка при проверке статуса.")
+
+async def check_song_automatically(context: ContextTypes.DEFAULT_TYPE):
+    """Автоматическая проверка готовности песни через 3 минуты"""
+    job_data = context.job.data
+    task_id = job_data['task_id']
+    chat_id = job_data['chat_id']
+    
+    try:
+        # Импортируем функцию проверки статуса
+        from song_generator import check_suno_task_status
+        
+        # Проверяем статус
+        status_result = check_suno_task_status(task_id)
+        
+        if status_result:
+            status = status_result.get('status', 'unknown')
+            
+            if status == 'complete':
+                # Музыка готова - отправляем в чат
+                audio_urls = status_result.get('audio_urls', [])
+                song_info = context.bot_data.get('song_tasks', {}).get(task_id, {}).get('song_data', {})
+                
+                if audio_urls:
+                    await context.bot.send_message(
+                        chat_id=int(chat_id),
+                        text=f"🎵 <b>Музыка готова!</b> 🎵\n\n"
+                             f"Название: <b>{song_info.get('song_title', 'Песня дня')}</b>\n"
+                             f"Жанр: <b>{song_info.get('genre', 'Pop')}</b>\n"
+                             f"Настроение: <b>{song_info.get('mood', 'Happy')}</b>\n\n"
+                             f"Ссылки на аудио:\n"
+                             f"{chr(10).join([f'• {url}' for url in audio_urls])}",
+                        parse_mode='HTML'
+                    )
+                else:
+                    await context.bot.send_message(
+                        chat_id=int(chat_id),
+                        text=f"🎵 <b>Музыка готова!</b> 🎵\n\n"
+                             f"Название: <b>{song_info.get('song_title', 'Песня дня')}</b>\n"
+                             f"Жанр: <b>{song_info.get('genre', 'Pop')}</b>\n"
+                             f"Настроение: <b>{song_info.get('mood', 'Happy')}</b>\n\n"
+                             f"Но ссылки на аудио не найдены.",
+                        parse_mode='HTML'
+                    )
+                
+                # Удаляем задачу из сохраненных
+                if 'song_tasks' in context.bot_data and task_id in context.bot_data['song_tasks']:
+                    del context.bot_data['song_tasks'][task_id]
+                    
+            elif status == 'failed':
+                await context.bot.send_message(
+                    chat_id=int(chat_id),
+                    text="❌ <b>Ошибка генерации музыки</b>\n\n"
+                         "Попробуйте создать песню заново.",
+                    parse_mode='HTML'
+                )
+                
+                # Удаляем задачу из сохраненных
+                if 'song_tasks' in context.bot_data and task_id in context.bot_data['song_tasks']:
+                    del context.bot_data['song_tasks'][task_id]
+                    
+            else:
+                # Если еще не готово, запускаем еще одну проверку через 30 секунд
+                context.job_queue.run_once(
+                    check_song_automatically, 
+                    30,  # 30 секунд
+                    data={'task_id': task_id, 'chat_id': chat_id}
+                )
+                
+        else:
+            # Если не удалось получить статус, пробуем еще раз через минуту
+            context.job_queue.run_once(
+                check_song_automatically, 
+                60,  # 1 минута
+                data={'task_id': task_id, 'chat_id': chat_id}
+            )
+            
+    except Exception as e:
+        logger.error(f"Ошибка автоматической проверки песни: {e}")
+        # В случае ошибки пробуем еще раз через 2 минуты
+        context.job_queue.run_once(
+            check_song_automatically, 
+            120,  # 2 минуты
+            data={'task_id': task_id, 'chat_id': chat_id}
+        )
+
 async def send_daily_reports(context: ContextTypes.DEFAULT_TYPE):
     """Отправка ежедневных отчетов"""
     logger.info("Начинаю отправку ежедневных отчетов")
@@ -737,34 +1009,60 @@ async def send_daily_reports(context: ContextTypes.DEFAULT_TYPE):
             
             await context.bot.send_message(
                 chat_id=int(chat_id), 
-                text=f"🏆 <b>Топ участников дня:</b>\n\n{top_summary}",
+                text=f"🏆 <b>Топ участников за последние 24 часа:</b>\n\n{top_summary}",
                 parse_mode='HTML'
             )
             
-            # Генерируем и отправляем фото директора для ежедневных отчетов
-            if PHOTO_GENERATOR_AVAILABLE:
+
+            
+            # Генерируем и отправляем подарок директору
+            if DIRECTOR_ANALYZER_AVAILABLE:
                 try:
-                    import asyncio
-                    loop = asyncio.get_event_loop()
-                    photo_path = await loop.run_in_executor(None, generate_director_photo, top_summary)
+                    await asyncio.sleep(2)  # Пауза между сообщениями
                     
-                    if photo_path and os.path.exists(photo_path):
-                        with open(photo_path, 'rb') as photo:
-                            await context.bot.send_photo(
-                                chat_id=int(chat_id),
-                                photo=photo,
-                                caption="📸 <b>ФОТО ДИРЕКТОРА ЧАТА</b> 📸",
-                                parse_mode='HTML'
-                            )
+                    # Анализируем директора и создаем подарок
+                    analysis_result = await loop.run_in_executor(None, analyze_director_and_gift, message_store, chat_id)
+                    
+                    if analysis_result:
+                        # Отправляем описание подарка
+                        gift_message = format_gift_message(analysis_result)
+                        await context.bot.send_message(
+                            chat_id=int(chat_id),
+                            text=gift_message,
+                            parse_mode='HTML'
+                        )
                         
-                        # Удаляем временный файл
-                        try:
-                            os.remove(photo_path)
-                        except Exception as e:
-                            logger.warning(f"Не удалось удалить временный файл: {e}")
-                            
+                        # Генерируем фото подарка если доступен генератор фото
+                        if PHOTO_GENERATOR_API_AVAILABLE and analysis_result.get('gift_photo_prompt'):
+                            try:
+                                await asyncio.sleep(1)  # Пауза перед фото
+                                photo_prompt = analysis_result['gift_photo_prompt']
+                                photo_path = await loop.run_in_executor(None, generate_photo, photo_prompt)
+                                
+                                if photo_path and os.path.exists(photo_path):
+                                    # Отправляем фото подарка
+                                    with open(photo_path, 'rb') as photo:
+                                        await context.bot.send_photo(
+                                            chat_id=int(chat_id),
+                                            photo=photo,
+                                            caption=f"📸 <b>ФОТО ПОДАРКА ДЛЯ: {analysis_result['director_name']}</b> 📸",
+                                            parse_mode='HTML'
+                                        )
+                                    
+                                    # Удаляем временный файл
+                                    try:
+                                        os.remove(photo_path)
+                                    except Exception as e:
+                                        logger.warning(f"Не удалось удалить временный файл: {e}")
+                                        
+                            except Exception as e:
+                                logger.error(f"Ошибка генерации фото подарка в ежедневном отчете: {e}")
+                                
+                    else:
+                        logger.warning(f"Не удалось проанализировать директора для чата {chat_id}")
+                        
                 except Exception as e:
-                    logger.error(f"Ошибка генерации фото директора в ежедневном отчете: {e}")
+                    logger.error(f"Ошибка генерации подарка директора в ежедневном отчете: {e}")
             
         except Exception as e:
             logger.error(f"Ошибка при отправке отчета в чат {chat_id}: {e}")
@@ -776,13 +1074,13 @@ async def manual_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /sum для ручной суммаризации"""
     chat_id = str(update.message.chat_id)
     summary = await get_summary(1, chat_id)
-    await safe_send_message(update, f"📋 <b>Итоги дня:</b>\n\n{summary}")
+    await safe_send_message(update, f"📋 <b>Итоги за последние 24 часа:</b>\n\n{summary}")
 
 async def top_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /top для топа участников дня"""
     chat_id = str(update.message.chat_id)
     top_summary = await get_top_summary(1, chat_id)
-    await safe_send_message(update, f"🏆 <b>Топ участников дня:</b>\n\n{top_summary}")
+    await safe_send_message(update, f"🏆 <b>Топ участников за последние 24 часа:</b>\n\n{top_summary}")
     
     # Генерируем и отправляем фото директора
     await send_director_photo(update, context, top_summary)
@@ -955,6 +1253,7 @@ def main():
         application.add_handler(CommandHandler("topdate", topdate_command))
         application.add_handler(CommandHandler("q", chatgpt_query))
         application.add_handler(CommandHandler("photo", photo_command))
+        application.add_handler(CommandHandler("check_song", check_song_status))
         application.add_handler(InlineQueryHandler(inline_query))
         # Обработчик текстовых сообщений (включая кнопки и вопросы с "?")
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
