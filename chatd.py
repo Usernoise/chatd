@@ -553,7 +553,7 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
         top_summary = await get_top_summary(7, chat_id)
         await safe_send_message(update, f"📅 <b>Топ участников недели:</b>\n\n{top_summary}")
         
-    elif text == "🤔 Че у вас тут происходит":
+    elif text == "Че у вас здесь происходит?":
         summary = await get_summary_last_hours(2, chat_id)
         await safe_send_message(update, f"🤔 <b>Что происходило последние 2 часа:</b>\n\n{summary}")
 
