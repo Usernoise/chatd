@@ -38,6 +38,15 @@ except ImportError as e:
     PHOTO_GENERATOR_API_AVAILABLE = False
     logger.warning(f"API генератор фото недоступен: {e}")
 
+# Импортируем анализатор директора
+try:
+    from director_analyzer import analyze_director, generate_director_photo_prompt
+    DIRECTOR_ANALYZER_AVAILABLE = True
+    logger.info("Анализатор директора подключен")
+except ImportError as e:
+    DIRECTOR_ANALYZER_AVAILABLE = False
+    logger.warning(f"Анализатор директора недоступен: {e}")
+
 message_store = {}
 chat_threads = {}
 
@@ -111,7 +120,8 @@ def get_main_keyboard():
     keyboard = [
         ["📋 Итоги дня", "🏆 Топ дня"],
         ["❓ Вопрос", "📅 Топ недели"],
-        ["🤔 Че у вас тут происходит"]
+        ["🤔 Че у вас тут происходит"],
+        ["👔 Директор чата"]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -131,6 +141,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '📋 Итоги дня - суммаризация за сегодня\n'
         '🏆 Топ дня - рейтинг участников\n'
         '❓ Вопрос - задать вопрос ChatGPT\n'
+        '👔 Директор чата - анализ и фото директора\n'
         '📊 Статистика - информация о чате\n\n'
         '⌨️ **Команды:**\n'
         '/sum - итоги дня\n'
@@ -460,7 +471,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if message.text and not message.via_bot:
         # Проверяем кнопки клавиатуры
-        if message.text in ["📋 Итоги дня", "🏆 Топ дня", "❓ Вопрос", "📊 Статистика", "🤔 Че у вас тут происходит"]:
+        if message.text in ["📋 Итоги дня", "🏆 Топ дня", "❓ Вопрос", "📊 Статистика", "🤔 Че у вас тут происходит", "👔 Директор чата"]:
             await handle_keyboard_buttons(update, context)
             return
             
@@ -644,6 +655,70 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
     elif text == "Че у вас здесь происходит?":
         summary = await get_summary_last_hours(2, chat_id)
         await safe_send_message(update, f"🤔 <b>Что происходило последние 2 часа:</b>\n\n{summary}")
+        
+    elif text == "👔 Директор чата":
+        await handle_director_analysis(update, context)
+
+async def handle_director_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик анализа директора чата"""
+    if not DIRECTOR_ANALYZER_AVAILABLE:
+        await update.message.reply_text("❌ Анализатор директора недоступен")
+        return
+    
+    chat_id = str(update.message.chat_id)
+    
+    # Отправляем сообщение о начале анализа
+    status_message = await update.message.reply_text("👔 Анализирую директора чата...")
+    
+    try:
+        # Анализируем директора в отдельном потоке
+        import asyncio
+        loop = asyncio.get_event_loop()
+        analysis, director_name = await loop.run_in_executor(None, analyze_director, message_store, chat_id)
+        
+        if analysis and director_name:
+            # Отправляем описание директора
+            await safe_send_message(update, f"👔 <b>АНАЛИЗ ДИРЕКТОРА ЧАТА</b>\n\n{analysis}")
+            
+            # Генерируем промпт для фото
+            photo_prompt = await loop.run_in_executor(None, generate_director_photo_prompt, analysis)
+            
+            if photo_prompt and PHOTO_GENERATOR_API_AVAILABLE:
+                # Генерируем фото директора
+                photo_path = await loop.run_in_executor(None, generate_photo, photo_prompt)
+                
+                if photo_path and os.path.exists(photo_path):
+                    # Отправляем фото
+                    with open(photo_path, 'rb') as photo:
+                        await update.message.reply_photo(
+                            photo=photo,
+                            caption=f"📸 <b>ФОТО ДИРЕКТОРА: {director_name}</b> 📸",
+                            parse_mode='HTML'
+                        )
+                    
+                    # Удаляем временный файл
+                    try:
+                        os.remove(photo_path)
+                        logger.info(f"Временный файл удален: {photo_path}")
+                    except Exception as e:
+                        logger.warning(f"Не удалось удалить временный файл {photo_path}: {e}")
+                else:
+                    await update.message.reply_text("❌ Не удалось сгенерировать фото директора.")
+            else:
+                await update.message.reply_text("❌ Не удалось создать промпт для фото директора.")
+                
+        else:
+            await update.message.reply_text("❌ Не удалось проанализировать директора чата. Возможно, недостаточно сообщений за последние 24 часа.")
+            
+    except Exception as e:
+        logger.error(f"Ошибка анализа директора: {e}")
+        await update.message.reply_text("❌ Произошла ошибка при анализе директора. Попробуйте позже.")
+    finally:
+        # Удаляем сообщение о статусе
+        try:
+            await status_message.delete()
+        except:
+            pass
 
 async def send_daily_reports(context: ContextTypes.DEFAULT_TYPE):
     """Отправка ежедневных отчетов"""
