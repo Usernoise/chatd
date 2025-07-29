@@ -160,7 +160,7 @@ def generate_photo_prompt(director_info):
                 clean_info = clean_director_info_for_prompt(director_info)
                 
                 response = openai_client.chat.completions.create(
-                    model="gpt-4o-mini",
+                    model="gpt-4.1-mini",
                     messages=[
                         {
                             "role": "system", 

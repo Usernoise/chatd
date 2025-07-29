@@ -59,7 +59,7 @@ DIRECTOR_ANALYSIS_PROMPT = """
 [3-5 характерных фраз или выражений этого человека]
 
 **Внешнее описание:**
-[Краткое описание как должен выглядеть директор на фото - стиль, выражение лица, одежда, НЕ ВЫДУМЫВАЙ а только на основе сообщений, гиперболизируй для лучшей узнаваемости]
+[Краткое описание как должен выглядеть директор на фото - стиль, выражение лица, одежда, НЕ ВЫДУМЫВАЙ а только на основе сообщений, гиперболизируй для лучшей узнаваемости, а также верно определяй пол]
 
 ПРАВИЛА:
 - Анализируй ТОЛЬКО сообщения за последние 24 часа
@@ -115,7 +115,7 @@ def analyze_director(message_store, chat_id):
         
         # Анализируем через OpenAI
         response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4.1-mini",
             messages=[
                 {"role": "system", "content": DIRECTOR_ANALYSIS_PROMPT},
                 {"role": "user", "content": f"Вот сообщения чата за последние 24 часа:\n\n{messages}"}
@@ -173,43 +173,79 @@ def generate_director_photo_prompt(analysis_text):
             logger.error("OpenAI клиент недоступен")
             return None
         
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system", 
-                    "content": """Ты создаешь промпты для генерации официальных корпоративных портретов на основе описания директора чата.
-
-ТРЕБОВАНИЯ К ФОТО:
-- Максимально ОФИЦИАЛЬНЫЙ корпоративный стиль
-- АБСУРДНО серьезное выражение лица 
-- Деловой костюм или формальная одежда
-- Профессиональная студийная съемка
-- Нейтральный офисный фон или библиотека
-- Поза как у генерального директора крупной корпорации
-- Взгляд прямо в камеру с абсолютной уверенностью
-- Высокое качество как iPhone фото
-
-СТИЛЬ: Смешай серьезность корпоративного портрета с абсурдностью ситуации - обычный человек из чата позирует как топ-менеджер международной корпорации.
-
-Основывайся на описании директора и создай КРАТКИЙ английский промпт (максимум 50 слов) для генерации изображения."""
-                },
-                {
-                    "role": "user", 
-                    "content": f"Создай промпт для официального корпоративного портрета на основе этого анализа директора:\n\n{analysis_text}"
-                }
-            ],
-            temperature=0.7,
-            max_tokens=200
-        )
+        # Извлекаем секцию "Внешнее описание" из анализа
+        import re
+        external_description_match = re.search(r'\*\*Внешнее описание:\*\*\s*([^\n]+(?:\n(?!\*\*)[^\n]*)*)', analysis_text, re.MULTILINE)
         
-        prompt = response.choices[0].message.content.strip()
-        
-        # Добавляем технические детали для качества
-        enhanced_prompt = f"{prompt}, professional corporate headshot, business suit, serious expression, studio lighting, neutral background, direct eye contact, confident pose, high resolution, iPhone photo quality, realistic, 8k"
-        
-        logger.info(f"Сгенерирован промпт для фото директора: {enhanced_prompt}")
-        return enhanced_prompt
+        if external_description_match:
+            external_description = external_description_match.group(1).strip()
+            logger.info(f"Найдено внешнее описание: {external_description}")
+            
+            # Используем внешнее описание для создания промпта
+            response = openai_client.chat.completions.create(
+                model="gpt-4.1-mini",
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": """Ты создаешь промпты для генерации изображений на основе описания внешности человека.
+
+ТРЕБОВАНИЯ:
+- Создай КРАТКИЙ английский промпт (максимум 50 слов)
+- ПЕРЕВЕДИ описание с русского на английский язык
+- Сохрани все детали из описания
+- Высокое качество изображения
+- Реалистичный стиль
+
+ВАЖНО: Описание может быть на русском языке - переведи его на английский и создай промпт для генерации изображения."""
+                    },
+                    {
+                        "role": "user", 
+                        "content": f"Переведи на английский и создай промпт для фото на основе этого описания внешности:\n\n{external_description}"
+                    }
+                ],
+                temperature=0.5,
+                max_tokens=150
+            )
+            
+            prompt = response.choices[0].message.content.strip()
+            
+            # Добавляем технические детали для качества
+            enhanced_prompt = f"{prompt}, professional studio lighting, high resolution, realistic, 8k quality"
+            
+            logger.info(f"Сгенерирован промпт на основе внешнего описания: {enhanced_prompt}")
+            return enhanced_prompt
+        else:
+            logger.warning("Внешнее описание не найдено в анализе, используем fallback")
+            
+            # Fallback - используем весь анализ
+            response = openai_client.chat.completions.create(
+                model="gpt-4.1-mini",
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": """Ты создаешь промпты для генерации изображений на основе описания человека.
+
+ТРЕБОВАНИЯ:
+- Создай КРАТКИЙ английский промпт (максимум 50 слов)
+- ПЕРЕВЕДИ описание с русского на английский язык
+- Сохрани все детали из описания
+
+ВАЖНО: Описание может быть на русском языке - переведи его на английский и создай промпт для генерации изображения."""
+                    },
+                    {
+                        "role": "user", 
+                        "content": f"Переведи на английский и создай промпт для фото на основе этого описания:\n\n{analysis_text}"
+                    }
+                ],
+                temperature=0.5,
+                max_tokens=150
+            )
+            
+            prompt = response.choices[0].message.content.strip()
+            enhanced_prompt = f"{prompt}, professional studio lighting, high resolution, realistic, 8k quality"
+            
+            logger.info(f"Сгенерирован fallback промпт: {enhanced_prompt}")
+            return enhanced_prompt
         
     except Exception as e:
         logger.error(f"Ошибка генерации промпта для фото директора: {e}")
