@@ -29,6 +29,15 @@ except ImportError as e:
     PHOTO_GENERATOR_AVAILABLE = False
     logger.warning(f"Генератор фото директора недоступен: {e}")
 
+# Импортируем генератор фото по промпту
+try:
+    from photo_generator_api import generate_photo
+    PHOTO_GENERATOR_API_AVAILABLE = True
+    logger.info("API генератор фото подключен")
+except ImportError as e:
+    PHOTO_GENERATOR_API_AVAILABLE = False
+    logger.warning(f"API генератор фото недоступен: {e}")
+
 message_store = {}
 chat_threads = {}
 
@@ -130,40 +139,119 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '/date YYYY-MM-DD - итоги за конкретную дату\n'
         '/topdate YYYY-MM-DD - топ участников за дату\n'
         '/q <текст> - вопрос ChatGPT\n'
+        '/photo <промпт> - генерация фото\n'
         '/debug - информация о чате\n\n'
         '💡 **Примеры:**\n'
         '/date 2024-07-20\n'
-        '/topdate 2024-07-20\n\n'
+        '/topdate 2024-07-20\n'
+        '/photo cute cat sitting on a chair\n\n'
         '🔍 **Inline режим:**\n'
-        'Используйте @aisumbot day или week в любом чате.',
+        'Используйте @aisumbot day, week или /photo промпт в любом чате.',
         parse_mode='Markdown',
         reply_markup=keyboard
     )
 
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка inline запросов"""
-    query = update.inline_query.query.strip().lower()
+    query = update.inline_query.query.strip()
     
-    if query not in ["day", "week"]:
+    # Проверяем команду /photo
+    if query.startswith('/photo '):
+        if not PHOTO_GENERATOR_API_AVAILABLE:
+            await update.inline_query.answer([
+                InlineQueryResultArticle(
+                    id='error',
+                    title='Ошибка',
+                    input_message_content=InputTextMessageContent(
+                        "Генератор фото недоступен"
+                    )
+                )
+            ], cache_time=0)
+            return
+        
+        prompt = query[7:].strip()  # Убираем '/photo '
+        if not prompt:
+            await update.inline_query.answer([
+                InlineQueryResultArticle(
+                    id='help',
+                    title='Помощь',
+                    input_message_content=InputTextMessageContent(
+                        "Используйте: /photo ваш промпт\n\nПример: /photo cute cat"
+                    )
+                )
+            ], cache_time=300)
+            return
+        
+        try:
+            # Генерируем фото в отдельном потоке
+            import asyncio
+            loop = asyncio.get_event_loop()
+            photo_path = await loop.run_in_executor(None, generate_photo, prompt)
+            
+            if photo_path and os.path.exists(photo_path):
+                # Отправляем фото
+                with open(photo_path, 'rb') as photo:
+                    await update.inline_query.answer([
+                        InlineQueryResultArticle(
+                            id=str(uuid.uuid4()),
+                            title=f'Фото: {prompt[:30]}...',
+                            input_message_content=InputTextMessageContent(
+                                f"🖼️ Сгенерированное фото по запросу: {prompt}"
+                            )
+                        )
+                    ], cache_time=0)
+                
+                # Удаляем временный файл
+                try:
+                    os.remove(photo_path)
+                except Exception as e:
+                    logger.warning(f"Не удалось удалить временный файл {photo_path}: {e}")
+            else:
+                await update.inline_query.answer([
+                    InlineQueryResultArticle(
+                        id='error',
+                        title='Ошибка',
+                        input_message_content=InputTextMessageContent(
+                            "Не удалось сгенерировать фото. Попробуйте другой промпт."
+                        )
+                    )
+                ], cache_time=0)
+                
+        except Exception as e:
+            logger.error(f"Ошибка генерации фото: {e}")
+            await update.inline_query.answer([
+                InlineQueryResultArticle(
+                    id='error',
+                    title='Ошибка',
+                    input_message_content=InputTextMessageContent(
+                        "Произошла ошибка при генерации фото. Попробуйте позже."
+                    )
+                )
+            ], cache_time=0)
+        return
+    
+    # Обработка обычных inline запросов
+    query_lower = query.lower()
+    if query_lower not in ["day", "week"]:
         await update.inline_query.answer([
             InlineQueryResultArticle(
                 id='help',
                 title='Доступные команды',
                 input_message_content=InputTextMessageContent(
-                    "Используйте: day (итоги дня) или week (итоги недели)"
+                    "Используйте: day (итоги дня), week (итоги недели) или /photo промпт (генерация фото)"
                 )
             )
         ], cache_time=300)
         return
 
     try:
-        days = 1 if query == "day" else 7
+        days = 1 if query_lower == "day" else 7
         # Получаем chat_id из контекста inline запроса
         # Для inline запросов используем from_user.id как fallback
         chat_id = update.inline_query.chat_type or str(update.inline_query.from_user.id)
         
         summary = await get_summary(days, chat_id)
-        title = 'Итоги дня' if query == "day" else 'Итоги недели'
+        title = 'Итоги дня' if query_lower == "day" else 'Итоги недели'
         unique_id = str(uuid.uuid4())
         
         await update.inline_query.answer([
@@ -722,6 +810,59 @@ async def chatgpt_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка в ChatGPT-запросе: {e}")
         await update.message.reply_text("❌ Ошибка при обработке запроса. Попробуйте позже.")
 
+async def photo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /photo для генерации фото"""
+    if not PHOTO_GENERATOR_API_AVAILABLE:
+        await update.message.reply_text("❌ Генератор фото недоступен")
+        return
+    
+    prompt = update.message.text[7:].strip()  # убираем /photo
+    
+    if not prompt:
+        await update.message.reply_text(
+            "🖼️ Введите промпт после команды /photo\n\n"
+            "Пример: <code>/photo cute cat sitting on a chair</code>",
+            parse_mode='HTML'
+        )
+        return
+    
+    # Отправляем сообщение о начале генерации
+    status_message = await update.message.reply_text("🎨 Генерирую фото...")
+    
+    try:
+        # Генерируем фото в отдельном потоке
+        import asyncio
+        loop = asyncio.get_event_loop()
+        photo_path = await loop.run_in_executor(None, generate_photo, prompt)
+        
+        if photo_path and os.path.exists(photo_path):
+            # Отправляем фото
+            with open(photo_path, 'rb') as photo:
+                await update.message.reply_photo(
+                    photo=photo,
+                    caption=f"🖼️ Сгенерированное фото по запросу: {prompt}"
+                )
+            
+            # Удаляем временный файл
+            try:
+                os.remove(photo_path)
+                logger.info(f"Временный файл удален: {photo_path}")
+            except Exception as e:
+                logger.warning(f"Не удалось удалить временный файл {photo_path}: {e}")
+                
+        else:
+            await update.message.reply_text("❌ Не удалось сгенерировать фото. Попробуйте другой промпт.")
+            
+    except Exception as e:
+        logger.error(f"Ошибка генерации фото: {e}")
+        await update.message.reply_text("❌ Произошла ошибка при генерации фото. Попробуйте позже.")
+    finally:
+        # Удаляем сообщение о статусе
+        try:
+            await status_message.delete()
+        except:
+            pass
+
 def main():
     """Основная функция запуска бота"""
     try:
@@ -736,6 +877,7 @@ def main():
         application.add_handler(CommandHandler("date", date_command))
         application.add_handler(CommandHandler("topdate", topdate_command))
         application.add_handler(CommandHandler("q", chatgpt_query))
+        application.add_handler(CommandHandler("photo", photo_command))
         application.add_handler(InlineQueryHandler(inline_query))
         # Обработчик текстовых сообщений (включая кнопки и вопросы с "?")
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
