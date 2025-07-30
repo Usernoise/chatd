@@ -311,8 +311,8 @@ async def get_summary(days, chat_id):
         return f"Нет сообщений для суммаризации за {period_text}."
     
     try:
-        response = await client.chat.completions.create(
-            model="gpt-4.1-mini",
+        response = await client.ChatCompletion.create(
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": SUMMARY_PROMPT},
                 {"role": "user", "content": f"Вот сообщения чата за {period_text}:\n\n{messages}"}
@@ -334,8 +334,8 @@ async def get_summary_for_date(date_str, chat_id):
         return f"Нет сообщений за {date_str}."
     
     try:
-        response = await client.chat.completions.create(
-            model="gpt-4.1-mini",
+        response = await client.ChatCompletion.create(
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": SUMMARY_PROMPT},
                 {"role": "user", "content": f"Вот сообщения чата за {date_str}:\n\n{messages}"}
@@ -355,8 +355,8 @@ async def get_summary_last_hours(hours, chat_id):
         return f"Нет сообщений за последние {hours} часов."
     
     try:
-        response = await client.chat.completions.create(
-            model="gpt-4.1-mini",
+        response = await client.ChatCompletion.create(
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": RECENT_SUMMARY_PROMPT},
                 {"role": "user", "content": f"Вот сообщения чата за последние {hours} часов:\n\n{messages}"}
@@ -384,8 +384,8 @@ async def get_top_summary(days, chat_id):
         return f"Нет сообщений за {period_text}."
     
     try:
-        response = await client.chat.completions.create(
-            model="gpt-4.1-mini",
+        response = await client.ChatCompletion.create(
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": TOP_SUMMARY_PROMPT},
                 {"role": "user", "content": f"Вот сообщения чата за {period_text}:\n\n{messages}"}
@@ -407,8 +407,8 @@ async def get_top_summary_for_date(date_str, chat_id):
         return f"Нет сообщений за {date_str}."
     
     try:
-        response = await client.chat.completions.create(
-            model="gpt-4.1-mini",
+        response = await client.ChatCompletion.create(
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": TOP_SUMMARY_PROMPT},
                 {"role": "user", "content": f"Вот сообщения чата за {date_str}:\n\n{messages}"}
@@ -513,8 +513,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_threads[chat_id].append({"role": "user", "content": prompt})
 
                 try:
-                    response = await client.chat.completions.create(
-                        model="gpt-4.1-mini",
+                    response = await client.ChatCompletion.create(
+                        model="gpt-4o-mini",
                         messages=chat_threads[chat_id],
                         temperature=0.7,
                         max_tokens=2500
@@ -1082,8 +1082,8 @@ async def chatgpt_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_threads[chat_id].append({"role": "user", "content": prompt})
 
     try:
-        response = await client.chat.completions.create(
-            model="gpt-4.1-mini",
+        response = await client.ChatCompletion.create(
+            model="gpt-4o-mini",
             messages=chat_threads[chat_id],
             temperature=0.7,
             max_tokens=2500
