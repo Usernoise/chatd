@@ -4,7 +4,7 @@ import requests
 import os
 from datetime import datetime, timedelta
 import pytz
-import openai
+from openai import OpenAI
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -23,7 +23,7 @@ except ImportError:
 
 # Инициализируем OpenAI клиента
 if openai_api_key:
-    openai_client = openai.OpenAI(api_key=openai_api_key)
+    openai_client = OpenAI(api_key=openai_api_key)
 else:
     openai_client = None
     logger.warning("OpenAI API ключ не найден")

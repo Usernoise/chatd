@@ -1,24 +1,56 @@
+import asyncio
+import json
 import logging
+import os
+import tempfile
+import requests
+from openai import OpenAI
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, InlineQueryHandler, filters, ContextTypes, JobQueue
 from datetime import datetime, timedelta, time
 import pytz
-from telegram import Update, InlineQueryResultArticle, InputTextMessageContent, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Application, CommandHandler, ContextTypes, InlineQueryHandler, MessageHandler, filters, JobQueue
-import openai
+import re
 import uuid
-import json
-import os
-import asyncio
-from prompts import SUMMARY_PROMPT, TOP_SUMMARY_PROMPT, CHATGPT_PROMPT, RECENT_SUMMARY_PROMPT
-from config import TELEGRAM_BOT_TOKEN, OPENAI_API_KEY, MESSAGE_STORE_FILE, MOSCOW_TIMEZONE
-import requests
-import tempfile
+from director_analyzer import analyze_director_and_gift, format_gift_message
+from song_generator import analyze_chat_and_generate_song, generate_music_with_suno, check_suno_task_status, wait_for_suno_completion, format_song_message
+from director_photo_generator import generate_director_photo
 
-openai.api_key = OPENAI_API_KEY
-
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-moscow_tz = pytz.timezone(MOSCOW_TIMEZONE)
+# Импортируем промпты
+try:
+    from prompts import SUMMARY_PROMPT, TOP_SUMMARY_PROMPT, CHATGPT_PROMPT, RECENT_SUMMARY_PROMPT
+    logger.info("Промпты загружены")
+except ImportError:
+    # Fallback промпты если файл не найден
+    SUMMARY_PROMPT = "Ты анализируешь сообщения чата и создаешь краткую сводку."
+    TOP_SUMMARY_PROMPT = "Ты анализируешь сообщения чата и выбираешь топ участников."
+    CHATGPT_PROMPT = "Ты полезный ассистент."
+    RECENT_SUMMARY_PROMPT = "Ты создаешь краткую сводку недавних сообщений."
+    logger.warning("Используются fallback промпты")
+
+# Импортируем конфиг
+try:
+    from config import TELEGRAM_BOT_TOKEN, OPENAI_API_KEY, MOSCOW_TIMEZONE, MESSAGE_STORE_FILE
+    bot_token = TELEGRAM_BOT_TOKEN
+    openai_api_key = OPENAI_API_KEY
+    moscow_tz = pytz.timezone(MOSCOW_TIMEZONE)
+    logger.info("Загружен конфиг из config.py")
+except ImportError:
+    bot_token = os.getenv('TELEGRAM_BOT_TOKEN', '')
+    openai_api_key = os.getenv('OPENAI_API_KEY', '')
+    moscow_tz = pytz.timezone('Europe/Moscow')
+    MESSAGE_STORE_FILE = "message_store.json"
+    logger.warning("Используются fallback значения конфига")
+
+# Инициализируем OpenAI клиента
+if openai_api_key:
+    openai_client = OpenAI(api_key=openai_api_key)
+else:
+    openai_client = None
+    logger.warning("OpenAI API ключ не найден")
 
 # Импортируем генератор фото директора после инициализации логгера
 try:
@@ -311,7 +343,7 @@ async def get_summary(days, chat_id):
         return f"Нет сообщений для суммаризации за {period_text}."
     
     try:
-        response = await openai.ChatCompletion.create(
+        response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": SUMMARY_PROMPT},
@@ -334,7 +366,7 @@ async def get_summary_for_date(date_str, chat_id):
         return f"Нет сообщений за {date_str}."
     
     try:
-        response = await openai.ChatCompletion.create(
+        response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": SUMMARY_PROMPT},
@@ -355,7 +387,7 @@ async def get_summary_last_hours(hours, chat_id):
         return f"Нет сообщений за последние {hours} часов."
     
     try:
-        response = await openai.ChatCompletion.create(
+        response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": RECENT_SUMMARY_PROMPT},
@@ -384,7 +416,7 @@ async def get_top_summary(days, chat_id):
         return f"Нет сообщений за {period_text}."
     
     try:
-        response = await openai.ChatCompletion.create(
+        response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": TOP_SUMMARY_PROMPT},
@@ -407,7 +439,7 @@ async def get_top_summary_for_date(date_str, chat_id):
         return f"Нет сообщений за {date_str}."
     
     try:
-        response = await openai.ChatCompletion.create(
+        response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": TOP_SUMMARY_PROMPT},
@@ -513,7 +545,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_threads[chat_id].append({"role": "user", "content": prompt})
 
                 try:
-                    response = await openai.ChatCompletion.create(
+                    response = openai_client.chat.completions.create(
                         model="gpt-4o-mini",
                         messages=chat_threads[chat_id],
                         temperature=0.7,
@@ -564,7 +596,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # Транскрибируем
             with open(temp_file_path, 'rb') as audio_file:
-                transcript = await openai.Audio.transcribe(
+                transcript = openai_client.audio.transcriptions.create(
                     model="whisper-1",
                     file=audio_file
                 )
@@ -1100,7 +1132,7 @@ async def chatgpt_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_threads[chat_id].append({"role": "user", "content": prompt})
 
     try:
-        response = await openai.ChatCompletion.create(
+        response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=chat_threads[chat_id],
             temperature=0.7,
