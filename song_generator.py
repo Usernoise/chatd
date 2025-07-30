@@ -97,7 +97,7 @@ def improve_song_lyrics_with_claude(lyrics):
 УЛУЧШЕННЫЙ ТЕКСТ:"""
         
         response = anthropic_client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model="claude-sonnet-4-20250514",
             max_tokens=1024,
             messages=[
                 {"role": "user", "content": prompt}
