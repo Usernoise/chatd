@@ -243,7 +243,7 @@ def generate_music_with_suno(song_data):
             "title": song_data['song_title'][:80],  # Ограничиваем длину названия
             "customMode": True,
             "instrumental": False,  # С вокалом
-            "model": "V3_5",  # Используем стабильную модель
+            "model": "V4_5PLUS",  # Используем стабильную модель
             "negativeTags": "Heavy Metal, Upbeat Drums",  # Исключаем нежелательные стили
             "callBackUrl": "https://example.com/callback"  # Заглушка для обязательного параметра
         }
