@@ -5,6 +5,7 @@ import os
 from datetime import datetime, timedelta
 import pytz
 from openai import OpenAI
+import anthropic
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -12,13 +13,15 @@ logger = logging.getLogger(__name__)
 
 # Импортируем конфиг
 try:
-    from config import OPENAI_API_KEY_EXTENDED, SUNO_API_KEY
+    from config import OPENAI_API_KEY_EXTENDED, SUNO_API_KEY, ANTHROPIC_API_KEY
     openai_api_key = OPENAI_API_KEY_EXTENDED
     suno_api_key = SUNO_API_KEY
+    anthropic_api_key = ANTHROPIC_API_KEY
     logger.info("Загружен конфиг из config.py")
 except ImportError:
     openai_api_key = os.getenv('OPENAI_API_KEY', '')
     suno_api_key = os.getenv('SUNO_API_KEY', '')
+    anthropic_api_key = os.getenv('ANTHROPIC_API_KEY', '')
     logger.warning("Используются fallback значения конфига")
 
 # Инициализируем OpenAI клиента
@@ -27,6 +30,13 @@ if openai_api_key:
 else:
     openai_client = None
     logger.warning("OpenAI API ключ не найден")
+
+# Инициализируем Anthropic клиента
+if anthropic_api_key:
+    anthropic_client = anthropic.Anthropic(api_key=anthropic_api_key)
+else:
+    anthropic_client = None
+    logger.warning("Anthropic API ключ не найден")
 
 def get_messages_last_24h(message_store, chat_id):
     """
@@ -55,6 +65,52 @@ def get_messages_last_24h(message_store, chat_id):
     ]
     
     return "\n".join(relevant_messages)
+
+def improve_song_lyrics_with_claude(lyrics):
+    """
+    Улучшает текст песни через Claude API, делая его более рифмованным
+    """
+    try:
+        if not anthropic_client:
+            logger.warning("Anthropic клиент недоступен, возвращаем оригинальный текст")
+            return lyrics
+        
+        prompt = f"""Ты эксперт по написанию песен. У тебя есть текст песни, который нужно улучшить и сделать более рифмованным.
+
+ОРИГИНАЛЬНЫЙ ТЕКСТ:
+{lyrics}
+
+ТВОИ ЗАДАЧИ:
+1. Сохрани основную идею и смысл песни
+2. Сделай текст более рифмованным и мелодичным
+3. Улучши структуру куплетов и припевов
+4. Добавь рифмы где их не хватает
+5. Сохрани имена персонажей и ключевые события
+
+ТРЕБОВАНИЯ:
+- Сохрани оригинальную длину (примерно столько же строк)
+- Не меняй кардинально смысл
+- Сделай рифмы естественными
+- Сохрани жанр и настроение
+- Верни только улучшенный текст без объяснений
+
+УЛУЧШЕННЫЙ ТЕКСТ:"""
+        
+        response = anthropic_client.messages.create(
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=1024,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        improved_lyrics = response.content[0].text.strip()
+        logger.info("Текст песни улучшен через Claude API")
+        return improved_lyrics
+        
+    except Exception as e:
+        logger.error(f"Ошибка улучшения текста через Claude: {e}")
+        return lyrics
 
 def analyze_chat_and_generate_song(message_store, chat_id):
     """
@@ -177,9 +233,12 @@ def generate_music_with_suno(song_data):
         
         url = "https://api.sunoapi.org/api/v1/generate"
         
+        # Улучшаем текст песни через Claude API
+        improved_lyrics = improve_song_lyrics_with_claude(song_data['lyrics'])
+        
         # Подготавливаем параметры для Suno API
         payload = {
-            "prompt": song_data['lyrics'][:3000],  # Ограничиваем длину текста
+            "prompt": improved_lyrics[:3000],  # Ограничиваем длину улучшенного текста
             "style": song_data['genre'],
             "title": song_data['song_title'][:80],  # Ограничиваем длину названия
             "customMode": True,
