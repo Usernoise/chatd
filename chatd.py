@@ -33,7 +33,7 @@ except ImportError:
 
 # Импортируем конфиг
 try:
-    from config import TELEGRAM_BOT_TOKEN, OPENAI_API_KEY, MOSCOW_TIMEZONE, MESSAGE_STORE_FILE
+    from config import TELEGRAM_BOT_TOKEN, OPENAI_API_KEY, MOSCOW_TIMEZONE, MESSAGE_STORE_FILE, AUTO_RESPONSE_INTERVAL
     bot_token = TELEGRAM_BOT_TOKEN
     openai_api_key = OPENAI_API_KEY
     moscow_tz = pytz.timezone(MOSCOW_TIMEZONE)
@@ -43,6 +43,7 @@ except ImportError:
     openai_api_key = os.getenv('OPENAI_API_KEY', '')
     moscow_tz = pytz.timezone('Europe/Moscow')
     MESSAGE_STORE_FILE = "message_store.json"
+    AUTO_RESPONSE_INTERVAL = 20  # Fallback значение
     logger.warning("Используются fallback значения конфига")
 
 # Инициализируем OpenAI клиента
@@ -95,6 +96,9 @@ chat_threads = {}
 save_counter = 0
 SAVE_BATCH_SIZE = 10
 
+# Счетчик сообщений для автоматических ответов
+message_counters = {}
+
 def load_messages_from_file():
     """Загрузка сообщений из файла с обработкой ошибок"""
     if os.path.exists(MESSAGE_STORE_FILE):
@@ -116,6 +120,12 @@ def load_messages_from_file():
     else:
         logger.info("Файл хранения сообщений не существует. Начинаем с пустого.")
         return {}
+
+def reset_message_counters():
+    """Сброс счетчиков сообщений при перезапуске бота"""
+    global message_counters
+    message_counters = {}
+    logger.info("Счетчики сообщений сброшены")
 
 def save_messages_to_file(force=False):
     """Сохранение сообщений в файл с батчингом"""
@@ -163,8 +173,7 @@ def get_main_keyboard():
         ["❓ Вопрос", "📅 Топ недели"],
         ["🤔 Че у вас тут происходит"],
         ["🎁 Подарок директору"],
-        ["🎵 Песня дня"],
-        ["🧪 Тест"]
+        ["🎵 Песня дня"]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -345,7 +354,7 @@ async def get_summary(days, chat_id):
     
     try:
         response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4.1-mini",
             messages=[
                 {"role": "system", "content": SUMMARY_PROMPT},
                 {"role": "user", "content": f"Вот сообщения чата за {period_text}:\n\n{messages}"}
@@ -368,7 +377,7 @@ async def get_summary_for_date(date_str, chat_id):
     
     try:
         response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4.1-mini",
             messages=[
                 {"role": "system", "content": SUMMARY_PROMPT},
                 {"role": "user", "content": f"Вот сообщения чата за {date_str}:\n\n{messages}"}
@@ -389,7 +398,7 @@ async def get_summary_last_hours(hours, chat_id):
     
     try:
         response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4.1-mini",
             messages=[
                 {"role": "system", "content": RECENT_SUMMARY_PROMPT},
                 {"role": "user", "content": f"Вот сообщения чата за последние {hours} часов:\n\n{messages}"}
@@ -418,7 +427,7 @@ async def get_top_summary(days, chat_id):
     
     try:
         response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4.1-mini",
             messages=[
                 {"role": "system", "content": TOP_SUMMARY_PROMPT},
                 {"role": "user", "content": f"Вот сообщения чата за {period_text}:\n\n{messages}"}
@@ -441,7 +450,7 @@ async def get_top_summary_for_date(date_str, chat_id):
     
     try:
         response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4.1-mini",
             messages=[
                 {"role": "system", "content": TOP_SUMMARY_PROMPT},
                 {"role": "user", "content": f"Вот сообщения чата за {date_str}:\n\n{messages}"}
@@ -531,7 +540,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if message.text and not message.via_bot:
         # Проверяем кнопки клавиатуры
-        if message.text in ["📋 Итоги дня", "🏆 Топ дня", "❓ Вопрос", "📊 Статистика", "🤔 Че у вас тут происходит", "🎁 Подарок директору", "🎵 Песня дня", "🧪 Тест"]:
+        if message.text in ["📋 Итоги дня", "🏆 Топ дня", "❓ Вопрос", "📊 Статистика", "🤔 Че у вас тут происходит", "🎁 Подарок директору", "🎵 Песня дня"]:
             await handle_keyboard_buttons(update, context)
             return
             
@@ -547,7 +556,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 try:
                     response = openai_client.chat.completions.create(
-                        model="gpt-4o-mini",
+                        model="gpt-4.1-mini",
                         messages=chat_threads[chat_id],
                         temperature=0.7,
                         max_tokens=2500
@@ -577,6 +586,43 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'timestamp': message.date.replace(tzinfo=pytz.UTC).astimezone(moscow_tz)
         }
         save_messages_to_file()
+        
+        # Проверяем счетчик сообщений для автоматического ответа
+        if chat_id not in message_counters:
+            message_counters[chat_id] = 0
+        
+        message_counters[chat_id] += 1
+        
+        # Если это каждое N-е сообщение и автоответы включены, отправляем его в ChatGPT
+        if AUTO_RESPONSE_INTERVAL > 0 and message_counters[chat_id] % AUTO_RESPONSE_INTERVAL == 0:
+            logger.info(f"Автоматический ответ на {message_counters[chat_id]}-е сообщение в чате {chat_id}")
+            
+            # Создаем контекст для ChatGPT
+            if chat_id not in chat_threads:
+                chat_threads[chat_id] = [{"role": "system", "content": CHATGPT_PROMPT}]
+
+            chat_threads[chat_id].append({"role": "user", "content": message.text})
+
+            try:
+                response = openai_client.chat.completions.create(
+                    model="gpt-4.1-mini",
+                    messages=chat_threads[chat_id],
+                    temperature=0.7,
+                    max_tokens=2500
+                )
+                
+                reply = response.choices[0].message.content
+                chat_threads[chat_id].append({"role": "assistant", "content": reply})
+                
+                # Ограничиваем размер треда
+                if len(chat_threads[chat_id]) > 20:
+                    chat_threads[chat_id] = chat_threads[chat_id][:1] + chat_threads[chat_id][-10:]
+                    
+                await update.message.reply_text(f"🤖 {reply}")
+                
+            except Exception as e:
+                logger.error(f"Ошибка в автоматическом ChatGPT-запросе: {e}")
+                await update.message.reply_text("❌ Ошибка при автоматической обработке сообщения.")
         
     elif message.voice:
         # Обработка голосового сообщения
@@ -642,7 +688,13 @@ async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         debug_info += f"Новейшее: <code>{newest['timestamp'].strftime('%d.%m.%Y %H:%M')}</code>\n"
         
     debug_info += f"Сейчас: <code>{current_time.strftime('%d.%m.%Y %H:%M')}</code>\n"
-    debug_info += f"Размер chat_threads: <code>{len(chat_threads)}</code>"
+    debug_info += f"Размер chat_threads: <code>{len(chat_threads)}</code>\n"
+    debug_info += f"Счетчик сообщений: <code>{message_counters.get(chat_id, 0)}</code>\n"
+    if AUTO_RESPONSE_INTERVAL > 0:
+        next_response = AUTO_RESPONSE_INTERVAL - (message_counters.get(chat_id, 0) % AUTO_RESPONSE_INTERVAL)
+        debug_info += f"Следующий автоответ: <code>{next_response}</code>"
+    else:
+        debug_info += f"Автоответы: <code>отключены</code>"
     
     await update.message.reply_text(debug_info, parse_mode='HTML')
 
@@ -721,9 +773,6 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
         
     elif text == "🎵 Песня дня":
         await handle_song_generation(update, context)
-        
-    elif text == "🧪 Тест":
-        await handle_test_song(update, context)
 
 async def handle_director_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик генерации подарка для директора чата"""
@@ -788,114 +837,6 @@ async def handle_director_gift(update: Update, context: ContextTypes.DEFAULT_TYP
         except:
             pass
 
-async def handle_test_song(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик тестовой кнопки для проверки отправки песни"""
-    chat_id = str(update.message.chat_id)
-    
-    # Отправляем сообщение о начале теста
-    status_message = await update.message.reply_text("🧪 Запускаю тест отправки песни...")
-    
-    try:
-        # Создаем тестовые данные песни
-        test_song_data = {
-            'song_title': 'Тестовая песня',
-            'genre': 'Pop',
-            'mood': 'Happy'
-        }
-        
-        # Создаем тестовые данные треков
-        test_suno_data = [
-            {
-                'duration': '158.04',
-                'modelName': 'chirp-v4',
-                'audioUrl': 'https://apiboxfiles.erweima.ai/ZDViMjEwZjUtMGE3YS00NTc0LTlkN2MtYjY5MTljNTgwNTc5.mp3',
-                'imageUrl': 'https://apiboxfiles.erweima.ai/ZDViMjEwZjUtMGE3YS00NTc0LTlkN2MtYjY5MTljNTgwNTc5.jpeg'
-            },
-            {
-                'duration': '169.96',
-                'modelName': 'chirp-v4',
-                'audioUrl': 'https://apiboxfiles.erweima.ai/ZGE4YWM5ZTAtZWY0ZC00OGVmLWFlMmEtNjI2Y2IwNzVmN2Q1.mp3',
-                'imageUrl': 'https://apiboxfiles.erweima.ai/ZGE4YWM5ZTAtZWY0ZC00OGVmLWFlMmEtNjI2Y2IwNzVmN2Q1.jpeg'
-            }
-        ]
-        
-        # Логируем информацию о песне
-        logger.info(f"Отправляем тестовую песню: {test_song_data.get('song_title', 'Тестовая песня')} - {len(test_suno_data)} треков")
-        
-        # Отправляем каждый трек с аудио и обложкой
-        for i, track in enumerate(test_suno_data, 1):
-            try:
-                audio_url = track.get('audioUrl')
-                image_url = track.get('imageUrl')
-                
-                if audio_url and image_url:
-                    # Загружаем аудио и обложку
-                    audio_response = requests.get(audio_url, timeout=30)
-                    image_response = requests.get(image_url, timeout=30)
-                    
-                    if audio_response.status_code == 200 and image_response.status_code == 200:
-                        # Создаем временные файлы
-                        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as audio_file:
-                            audio_file.write(audio_response.content)
-                            audio_path = audio_file.name
-                        
-                        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as image_file:
-                            image_file.write(image_response.content)
-                            image_path = image_file.name
-                        
-                        # Отправляем аудио с обложкой
-                        current_date = datetime.now().strftime("%d.%m.%y")
-                        
-                        with open(audio_path, 'rb') as audio, open(image_path, 'rb') as image:
-                            await context.bot.send_audio(
-                                chat_id=int(chat_id),
-                                audio=audio,
-                                thumbnail=image,
-                                title=f"{test_song_data.get('song_title', 'Тестовая песня')} - Трек {i}",
-                                performer=current_date,
-                                caption=f"🎵 <b>Трек {i}</b>",
-                                parse_mode='HTML'
-                            )
-                        
-                        # Удаляем временные файлы
-                        os.unlink(audio_path)
-                        os.unlink(image_path)
-                        
-                    else:
-                        # Если не удалось загрузить файлы, отправляем ссылки
-                        fallback_message = f"🎵 <b>Трек {i}</b>\n"
-                        fallback_message += f"Аудио: {audio_url}\n"
-                        fallback_message += f"Обложка: {image_url}"
-                        
-                        await context.bot.send_message(
-                            chat_id=int(chat_id),
-                            text=fallback_message,
-                            parse_mode='HTML'
-                        )
-                        
-            except Exception as e:
-                logger.error(f"Ошибка отправки тестового трека {i}: {e}")
-                # Отправляем fallback сообщение
-                fallback_message = f"🎵 <b>Трек {i}</b>\n"
-                fallback_message += f"Аудио: {track.get('audioUrl', 'N/A')}\n"
-                fallback_message += f"Обложка: {track.get('imageUrl', 'N/A')}"
-                
-                await context.bot.send_message(
-                    chat_id=int(chat_id),
-                    text=fallback_message,
-                    parse_mode='HTML'
-                )
-                
-    except Exception as e:
-        logger.error(f"Ошибка тестовой отправки песни: {e}")
-        await update.message.reply_text("❌ Произошла ошибка при тестовой отправке песни.")
-    finally:
-        # Удаляем сообщение о статусе
-        try:
-            await status_message.delete()
-        except:
-            pass
-
 async def handle_song_generation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик генерации песни дня"""
     if not SONG_GENERATOR_AVAILABLE:
@@ -922,7 +863,7 @@ async def handle_song_generation(update: Update, context: ContextTypes.DEFAULT_T
             if song_data.get('lyrics'):
                 try:
                     await asyncio.sleep(1)  # Пауза перед генерацией музыки
-                    await update.message.reply_text("🎼 Генерирую музыку через Suno API...")
+                    await update.message.reply_text("🎼 Я уже у микрофона, все будет готово через 3 минуты...")
                     
                     suno_result = await loop.run_in_executor(None, generate_music_with_suno, song_data)
                     
@@ -944,17 +885,7 @@ async def handle_song_generation(update: Update, context: ContextTypes.DEFAULT_T
                             data={'task_id': task_id, 'chat_id': chat_id}
                         )
                         
-                        # Отправляем информацию о созданной музыке
-                        await update.message.reply_text(
-                            f"🎵 <b>Музыка создана!</b>\n\n"
-                            f"Название: <b>{song_data['song_title']}</b>\n"
-                            f"Жанр: <b>{song_data['genre']}</b>\n"
-                            f"Настроение: <b>{song_data['mood']}</b>\n\n"
-                            f"Музыка генерируется на серверах Suno. "
-                            f"Обычно это занимает 2-3 минуты.\n\n"
-                            f"⏰ Через 3 минуты автоматически проверю готовность!",
-                            parse_mode='HTML'
-                        )
+
                     else:
                         await update.message.reply_text("❌ Не удалось создать музыку через Suno API.")
                         
@@ -1292,7 +1223,7 @@ async def chatgpt_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4.1-mini",
             messages=chat_threads[chat_id],
             temperature=0.7,
             max_tokens=2500
@@ -1367,6 +1298,9 @@ async def photo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     """Основная функция запуска бота"""
     try:
+        # Сбрасываем счетчики сообщений при запуске
+        reset_message_counters()
+        
         application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
         
         # Добавляем обработчики

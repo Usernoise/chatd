@@ -46,7 +46,7 @@ def enhance_prompt(user_prompt):
             return enhanced_prompt
         
         response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4.1-mini",
             messages=[
                 {
                     "role": "system", 

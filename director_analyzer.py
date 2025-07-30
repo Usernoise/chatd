@@ -69,7 +69,7 @@ def analyze_director_and_gift(message_store, chat_id):
             return None
         
         response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4.1-mini",
             messages=[
                 {
                     "role": "system",
