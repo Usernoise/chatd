@@ -862,7 +862,7 @@ async def handle_test_song(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             await context.bot.send_audio(
                                 chat_id=int(chat_id),
                                 audio=audio,
-                                thumb=image,
+                                thumbnail=image,
                                 title=f"{test_song_data.get('song_title', 'Тестовая песня')} - Трек {i}",
                                 performer="AI Generated",
                                 caption=caption,
@@ -1059,7 +1059,7 @@ async def check_song_automatically(context: ContextTypes.DEFAULT_TYPE):
                                         await context.bot.send_audio(
                                             chat_id=int(chat_id),
                                             audio=audio,
-                                            thumb=image,
+                                            thumbnail=image,
                                             title=f"{song_info.get('song_title', 'Песня дня')} - Трек {i}",
                                             performer="AI Generated",
                                             caption=caption,
