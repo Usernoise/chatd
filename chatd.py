@@ -819,18 +819,8 @@ async def handle_test_song(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }
         ]
         
-        # Отправляем основное сообщение
-        message = f"🎵 <b>Музыка готова!</b> 🎵\n\n"
-        message += f"Название: <b>{test_song_data.get('song_title', 'Тестовая песня')}</b>\n"
-        message += f"Жанр: <b>{test_song_data.get('genre', 'Pop')}</b>\n"
-        message += f"Настроение: <b>{test_song_data.get('mood', 'Happy')}</b>\n\n"
-        message += f"🎼 <b>Создано треков: {len(test_suno_data)}</b>\n\n"
-        
-        await context.bot.send_message(
-            chat_id=int(chat_id),
-            text=message,
-            parse_mode='HTML'
-        )
+        # Логируем информацию о песне
+        logger.info(f"Отправляем тестовую песню: {test_song_data.get('song_title', 'Тестовая песня')} - {len(test_suno_data)} треков")
         
         # Отправляем каждый трек с аудио и обложкой
         for i, track in enumerate(test_suno_data, 1):
@@ -854,9 +844,7 @@ async def handle_test_song(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             image_path = image_file.name
                         
                         # Отправляем аудио с обложкой
-                        caption = f"🎵 <b>Трек {i}</b>\n"
-                        caption += f"Длительность: {track.get('duration', 'N/A')} сек\n"
-                        caption += f"Модель: {track.get('modelName', 'N/A')}"
+                        current_date = datetime.now().strftime("%d.%m.%y")
                         
                         with open(audio_path, 'rb') as audio, open(image_path, 'rb') as image:
                             await context.bot.send_audio(
@@ -864,8 +852,8 @@ async def handle_test_song(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 audio=audio,
                                 thumbnail=image,
                                 title=f"{test_song_data.get('song_title', 'Тестовая песня')} - Трек {i}",
-                                performer="AI Generated",
-                                caption=caption,
+                                performer=current_date,
+                                caption=f"🎵 <b>Трек {i}</b>",
                                 parse_mode='HTML'
                             )
                         
@@ -875,9 +863,7 @@ async def handle_test_song(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         
                     else:
                         # Если не удалось загрузить файлы, отправляем ссылки
-                        fallback_message = f"🎵 <b>Трек {i}:</b>\n"
-                        fallback_message += f"Длительность: {track.get('duration', 'N/A')} сек\n"
-                        fallback_message += f"Модель: {track.get('modelName', 'N/A')}\n"
+                        fallback_message = f"🎵 <b>Трек {i}</b>\n"
                         fallback_message += f"Аудио: {audio_url}\n"
                         fallback_message += f"Обложка: {image_url}"
                         
@@ -890,9 +876,7 @@ async def handle_test_song(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 logger.error(f"Ошибка отправки тестового трека {i}: {e}")
                 # Отправляем fallback сообщение
-                fallback_message = f"🎵 <b>Трек {i}:</b>\n"
-                fallback_message += f"Длительность: {track.get('duration', 'N/A')} сек\n"
-                fallback_message += f"Модель: {track.get('modelName', 'N/A')}\n"
+                fallback_message = f"🎵 <b>Трек {i}</b>\n"
                 fallback_message += f"Аудио: {track.get('audioUrl', 'N/A')}\n"
                 fallback_message += f"Обложка: {track.get('imageUrl', 'N/A')}"
                 
@@ -1016,18 +1000,8 @@ async def check_song_automatically(context: ContextTypes.DEFAULT_TYPE):
                 suno_data = response_data.get('sunoData', [])
                 
                 if suno_data:
-                    # Отправляем основное сообщение
-                    message = f"🎵 <b>Музыка готова!</b> 🎵\n\n"
-                    message += f"Название: <b>{song_info.get('song_title', 'Песня дня')}</b>\n"
-                    message += f"Жанр: <b>{song_info.get('genre', 'Pop')}</b>\n"
-                    message += f"Настроение: <b>{song_info.get('mood', 'Happy')}</b>\n\n"
-                    message += f"🎼 <b>Создано треков: {len(suno_data)}</b>\n\n"
-                    
-                    await context.bot.send_message(
-                        chat_id=int(chat_id),
-                        text=message,
-                        parse_mode='HTML'
-                    )
+                    # Логируем информацию о песне
+                    logger.info(f"Отправляем песню: {song_info.get('song_title', 'Песня дня')} - {len(suno_data)} треков")
                     
                     # Отправляем каждый трек с аудио и обложкой
                     for i, track in enumerate(suno_data, 1):
@@ -1051,9 +1025,7 @@ async def check_song_automatically(context: ContextTypes.DEFAULT_TYPE):
                                         image_path = image_file.name
                                     
                                     # Отправляем аудио с обложкой
-                                    caption = f"🎵 <b>Трек {i}</b>\n"
-                                    caption += f"Длительность: {track.get('duration', 'N/A')} сек\n"
-                                    caption += f"Модель: {track.get('modelName', 'N/A')}"
+                                    current_date = datetime.now().strftime("%d.%m.%y")
                                     
                                     with open(audio_path, 'rb') as audio, open(image_path, 'rb') as image:
                                         await context.bot.send_audio(
@@ -1061,8 +1033,8 @@ async def check_song_automatically(context: ContextTypes.DEFAULT_TYPE):
                                             audio=audio,
                                             thumbnail=image,
                                             title=f"{song_info.get('song_title', 'Песня дня')} - Трек {i}",
-                                            performer="AI Generated",
-                                            caption=caption,
+                                            performer=current_date,
+                                            caption=f"🎵 <b>Трек {i}</b>",
                                             parse_mode='HTML'
                                         )
                                     
@@ -1072,9 +1044,7 @@ async def check_song_automatically(context: ContextTypes.DEFAULT_TYPE):
                                     
                                 else:
                                     # Если не удалось загрузить файлы, отправляем ссылки
-                                    fallback_message = f"🎵 <b>Трек {i}:</b>\n"
-                                    fallback_message += f"Длительность: {track.get('duration', 'N/A')} сек\n"
-                                    fallback_message += f"Модель: {track.get('modelName', 'N/A')}\n"
+                                    fallback_message = f"🎵 <b>Трек {i}</b>\n"
                                     fallback_message += f"Аудио: {audio_url}\n"
                                     fallback_message += f"Обложка: {image_url}"
                                     
@@ -1087,9 +1057,7 @@ async def check_song_automatically(context: ContextTypes.DEFAULT_TYPE):
                         except Exception as e:
                             logger.error(f"Ошибка отправки трека {i}: {e}")
                             # Отправляем fallback сообщение
-                            fallback_message = f"🎵 <b>Трек {i}:</b>\n"
-                            fallback_message += f"Длительность: {track.get('duration', 'N/A')} сек\n"
-                            fallback_message += f"Модель: {track.get('modelName', 'N/A')}\n"
+                            fallback_message = f"🎵 <b>Трек {i}</b>\n"
                             fallback_message += f"Аудио: {track.get('audioUrl', 'N/A')}\n"
                             fallback_message += f"Обложка: {track.get('imageUrl', 'N/A')}"
                             
