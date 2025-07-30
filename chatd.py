@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, time
 import pytz
 from telegram import Update, InlineQueryResultArticle, InputTextMessageContent, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, ContextTypes, InlineQueryHandler, MessageHandler, filters, JobQueue
-from openai import AsyncOpenAI
+import openai
 import uuid
 import json
 import os
@@ -13,7 +13,7 @@ from config import TELEGRAM_BOT_TOKEN, OPENAI_API_KEY, MESSAGE_STORE_FILE, MOSCO
 import requests
 import tempfile
 
-client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+openai.api_key = OPENAI_API_KEY
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -311,7 +311,7 @@ async def get_summary(days, chat_id):
         return f"Нет сообщений для суммаризации за {period_text}."
     
     try:
-        response = await client.ChatCompletion.create(
+        response = await openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": SUMMARY_PROMPT},
@@ -334,7 +334,7 @@ async def get_summary_for_date(date_str, chat_id):
         return f"Нет сообщений за {date_str}."
     
     try:
-        response = await client.ChatCompletion.create(
+        response = await openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": SUMMARY_PROMPT},
@@ -355,7 +355,7 @@ async def get_summary_last_hours(hours, chat_id):
         return f"Нет сообщений за последние {hours} часов."
     
     try:
-        response = await client.ChatCompletion.create(
+        response = await openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": RECENT_SUMMARY_PROMPT},
@@ -384,7 +384,7 @@ async def get_top_summary(days, chat_id):
         return f"Нет сообщений за {period_text}."
     
     try:
-        response = await client.ChatCompletion.create(
+        response = await openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": TOP_SUMMARY_PROMPT},
@@ -407,7 +407,7 @@ async def get_top_summary_for_date(date_str, chat_id):
         return f"Нет сообщений за {date_str}."
     
     try:
-        response = await client.ChatCompletion.create(
+        response = await openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": TOP_SUMMARY_PROMPT},
@@ -513,7 +513,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_threads[chat_id].append({"role": "user", "content": prompt})
 
                 try:
-                    response = await client.ChatCompletion.create(
+                    response = await openai.ChatCompletion.create(
                         model="gpt-4o-mini",
                         messages=chat_threads[chat_id],
                         temperature=0.7,
@@ -564,7 +564,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # Транскрибируем
             with open(temp_file_path, 'rb') as audio_file:
-                transcript = await client.audio.transcriptions.create(
+                transcript = await openai.Audio.transcribe(
                     model="whisper-1",
                     file=audio_file
                 )
@@ -782,7 +782,24 @@ async def handle_song_generation(update: Update, context: ContextTypes.DEFAULT_T
                     
                     suno_result = await loop.run_in_executor(None, generate_music_with_suno, song_data)
                     
-                    if suno_result and suno_result.get('data'):
+                    if suno_result and suno_result.get('task_id'):
+                        # Сохраняем задачу для автоматической проверки
+                        if 'song_tasks' not in context.bot_data:
+                            context.bot_data['song_tasks'] = {}
+                        
+                        task_id = suno_result['task_id']
+                        context.bot_data['song_tasks'][task_id] = {
+                            'song_data': song_data,
+                            'chat_id': chat_id
+                        }
+                        
+                        # Запускаем автоматическую проверку через 3 минуты
+                        context.job_queue.run_once(
+                            check_song_automatically,
+                            180,  # 3 минуты
+                            data={'task_id': task_id, 'chat_id': chat_id}
+                        )
+                        
                         # Отправляем информацию о созданной музыке
                         await update.message.reply_text(
                             f"🎵 <b>Музыка создана!</b>\n\n"
@@ -790,7 +807,8 @@ async def handle_song_generation(update: Update, context: ContextTypes.DEFAULT_T
                             f"Жанр: <b>{song_data['genre']}</b>\n"
                             f"Настроение: <b>{song_data['mood']}</b>\n\n"
                             f"Музыка генерируется на серверах Suno. "
-                            f"Обычно это занимает 2-3 минуты.",
+                            f"Обычно это занимает 2-3 минуты.\n\n"
+                            f"⏰ Через 3 минуты автоматически проверю готовность!",
                             parse_mode='HTML'
                         )
                     else:
@@ -1082,7 +1100,7 @@ async def chatgpt_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_threads[chat_id].append({"role": "user", "content": prompt})
 
     try:
-        response = await client.ChatCompletion.create(
+        response = await openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=chat_threads[chat_id],
             temperature=0.7,
