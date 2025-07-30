@@ -163,7 +163,8 @@ def get_main_keyboard():
         ["❓ Вопрос", "📅 Топ недели"],
         ["🤔 Че у вас тут происходит"],
         ["🎁 Подарок директору"],
-        ["🎵 Песня дня"]
+        ["🎵 Песня дня"],
+        ["🧪 Тест"]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -530,7 +531,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if message.text and not message.via_bot:
         # Проверяем кнопки клавиатуры
-        if message.text in ["📋 Итоги дня", "🏆 Топ дня", "❓ Вопрос", "📊 Статистика", "🤔 Че у вас тут происходит", "🎁 Подарок директору", "🎵 Песня дня"]:
+        if message.text in ["📋 Итоги дня", "🏆 Топ дня", "❓ Вопрос", "📊 Статистика", "🤔 Че у вас тут происходит", "🎁 Подарок директору", "🎵 Песня дня", "🧪 Тест"]:
             await handle_keyboard_buttons(update, context)
             return
             
@@ -720,6 +721,9 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
         
     elif text == "🎵 Песня дня":
         await handle_song_generation(update, context)
+        
+    elif text == "🧪 Тест":
+        await handle_test_song(update, context)
 
 async def handle_director_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик генерации подарка для директора чата"""
@@ -777,6 +781,130 @@ async def handle_director_gift(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception as e:
         logger.error(f"Ошибка генерации подарка: {e}")
         await update.message.reply_text("❌ Произошла ошибка при создании подарка. Попробуйте позже.")
+    finally:
+        # Удаляем сообщение о статусе
+        try:
+            await status_message.delete()
+        except:
+            pass
+
+async def handle_test_song(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик тестовой кнопки для проверки отправки песни"""
+    chat_id = str(update.message.chat_id)
+    
+    # Отправляем сообщение о начале теста
+    status_message = await update.message.reply_text("🧪 Запускаю тест отправки песни...")
+    
+    try:
+        # Создаем тестовые данные песни
+        test_song_data = {
+            'song_title': 'Тестовая песня',
+            'genre': 'Pop',
+            'mood': 'Happy'
+        }
+        
+        # Создаем тестовые данные треков
+        test_suno_data = [
+            {
+                'duration': '158.04',
+                'modelName': 'chirp-v4',
+                'audioUrl': 'https://apiboxfiles.erweima.ai/ZDViMjEwZjUtMGE3YS00NTc0LTlkN2MtYjY5MTljNTgwNTc5.mp3',
+                'imageUrl': 'https://apiboxfiles.erweima.ai/ZDViMjEwZjUtMGE3YS00NTc0LTlkN2MtYjY5MTljNTgwNTc5.jpeg'
+            },
+            {
+                'duration': '169.96',
+                'modelName': 'chirp-v4',
+                'audioUrl': 'https://apiboxfiles.erweima.ai/ZGE4YWM5ZTAtZWY0ZC00OGVmLWFlMmEtNjI2Y2IwNzVmN2Q1.mp3',
+                'imageUrl': 'https://apiboxfiles.erweima.ai/ZGE4YWM5ZTAtZWY0ZC00OGVmLWFlMmEtNjI2Y2IwNzVmN2Q1.jpeg'
+            }
+        ]
+        
+        # Отправляем основное сообщение
+        message = f"🎵 <b>Музыка готова!</b> 🎵\n\n"
+        message += f"Название: <b>{test_song_data.get('song_title', 'Тестовая песня')}</b>\n"
+        message += f"Жанр: <b>{test_song_data.get('genre', 'Pop')}</b>\n"
+        message += f"Настроение: <b>{test_song_data.get('mood', 'Happy')}</b>\n\n"
+        message += f"🎼 <b>Создано треков: {len(test_suno_data)}</b>\n\n"
+        
+        await context.bot.send_message(
+            chat_id=int(chat_id),
+            text=message,
+            parse_mode='HTML'
+        )
+        
+        # Отправляем каждый трек с аудио и обложкой
+        for i, track in enumerate(test_suno_data, 1):
+            try:
+                audio_url = track.get('audioUrl')
+                image_url = track.get('imageUrl')
+                
+                if audio_url and image_url:
+                    # Загружаем аудио и обложку
+                    audio_response = requests.get(audio_url, timeout=30)
+                    image_response = requests.get(image_url, timeout=30)
+                    
+                    if audio_response.status_code == 200 and image_response.status_code == 200:
+                        # Создаем временные файлы
+                        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as audio_file:
+                            audio_file.write(audio_response.content)
+                            audio_path = audio_file.name
+                        
+                        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as image_file:
+                            image_file.write(image_response.content)
+                            image_path = image_file.name
+                        
+                        # Отправляем аудио с обложкой
+                        caption = f"🎵 <b>Трек {i}</b>\n"
+                        caption += f"Длительность: {track.get('duration', 'N/A')} сек\n"
+                        caption += f"Модель: {track.get('modelName', 'N/A')}"
+                        
+                        with open(audio_path, 'rb') as audio, open(image_path, 'rb') as image:
+                            await context.bot.send_audio(
+                                chat_id=int(chat_id),
+                                audio=audio,
+                                thumb=image,
+                                title=f"{test_song_data.get('song_title', 'Тестовая песня')} - Трек {i}",
+                                performer="AI Generated",
+                                caption=caption,
+                                parse_mode='HTML'
+                            )
+                        
+                        # Удаляем временные файлы
+                        os.unlink(audio_path)
+                        os.unlink(image_path)
+                        
+                    else:
+                        # Если не удалось загрузить файлы, отправляем ссылки
+                        fallback_message = f"🎵 <b>Трек {i}:</b>\n"
+                        fallback_message += f"Длительность: {track.get('duration', 'N/A')} сек\n"
+                        fallback_message += f"Модель: {track.get('modelName', 'N/A')}\n"
+                        fallback_message += f"Аудио: {audio_url}\n"
+                        fallback_message += f"Обложка: {image_url}"
+                        
+                        await context.bot.send_message(
+                            chat_id=int(chat_id),
+                            text=fallback_message,
+                            parse_mode='HTML'
+                        )
+                        
+            except Exception as e:
+                logger.error(f"Ошибка отправки тестового трека {i}: {e}")
+                # Отправляем fallback сообщение
+                fallback_message = f"🎵 <b>Трек {i}:</b>\n"
+                fallback_message += f"Длительность: {track.get('duration', 'N/A')} сек\n"
+                fallback_message += f"Модель: {track.get('modelName', 'N/A')}\n"
+                fallback_message += f"Аудио: {track.get('audioUrl', 'N/A')}\n"
+                fallback_message += f"Обложка: {track.get('imageUrl', 'N/A')}"
+                
+                await context.bot.send_message(
+                    chat_id=int(chat_id),
+                    text=fallback_message,
+                    parse_mode='HTML'
+                )
+                
+    except Exception as e:
+        logger.error(f"Ошибка тестовой отправки песни: {e}")
+        await update.message.reply_text("❌ Произошла ошибка при тестовой отправке песни.")
     finally:
         # Удаляем сообщение о статусе
         try:
