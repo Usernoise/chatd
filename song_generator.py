@@ -23,7 +23,8 @@ except ImportError:
 
 # Инициализируем OpenAI клиента
 if openai_api_key:
-    openai_client = openai.OpenAI(api_key=openai_api_key)
+    openai.api_key = openai_api_key
+    openai_client = openai
 else:
     openai_client = None
     logger.warning("OpenAI API ключ не найден")
@@ -71,7 +72,7 @@ def analyze_chat_and_generate_song(message_store, chat_id):
             logger.warning("Нет сообщений за последние 24 часа")
             return None
         
-        response = openai_client.chat.completions.create(
+        response = openai_client.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=[
                 {
@@ -226,7 +227,7 @@ def check_suno_task_status(task_id):
             logger.error("Suno API ключ не найден")
             return None
         
-        url = f"https://api.sunoapi.org/api/v1/get?ids={task_id}"
+        url = f"https://api.sunoapi.org/api/v1/generate/record-info?taskId={task_id}"
         
         headers = {
             "Authorization": f"Bearer {suno_api_key}",
@@ -235,14 +236,20 @@ def check_suno_task_status(task_id):
         
         response = requests.get(url, headers=headers)
         
+        logger.info(f"Проверяем статус задачи {task_id}, ответ: {response.status_code}")
+        
         if response.status_code == 200:
             result = response.json()
+            logger.info(f"Ответ Suno API: {result}")
             if result.get('code') == 200 and result.get('data'):
-                task_data = result['data'][0] if isinstance(result['data'], list) else result['data']
+                task_data = result['data']
                 return task_data
             else:
                 logger.error(f"Ошибка в ответе Suno API: {result}")
                 return None
+        elif response.status_code == 404:
+            logger.warning(f"Задача {task_id} не найдена (404). Возможно, уже завершена или удалена.")
+            return None
         else:
             logger.error(f"Ошибка Suno API: {response.status_code} - {response.text}")
             return None
@@ -266,11 +273,11 @@ def wait_for_suno_completion(task_id, max_wait_time=180):
         
         if task_data:
             status = task_data.get('status')
-            if status == 'complete':
+            if status == 'SUCCESS':
                 logger.info("Музыка готова!")
                 return task_data
-            elif status == 'failed':
-                logger.error("Генерация музыки не удалась")
+            elif status in ['CREATE_TASK_FAILED', 'GENERATE_AUDIO_FAILED', 'CALLBACK_EXCEPTION', 'SENSITIVE_WORD_ERROR']:
+                logger.error(f"Генерация музыки не удалась: {status}")
                 return None
             else:
                 logger.info(f"Статус: {status}, ждем...")
@@ -310,5 +317,7 @@ def format_song_message(song_data):
 {song_data['lyrics']}"""
     
     return message
+
+
 
  

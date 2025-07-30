@@ -162,7 +162,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '/topdate YYYY-MM-DD - топ участников за дату\n'
         '/q <текст> - вопрос ChatGPT\n'
         '/photo <промпт> - генерация фото\n'
-        '/check_song <task_id> - проверка статуса песни\n'
         '/debug - информация о чате\n\n'
         '💡 **Примеры:**\n'
         '/date 2024-07-20\n'
@@ -779,44 +778,23 @@ async def handle_song_generation(update: Update, context: ContextTypes.DEFAULT_T
             if song_data.get('lyrics'):
                 try:
                     await asyncio.sleep(1)  # Пауза перед генерацией музыки
-                    await update.message.reply_text("🎼 Отправляю запрос на генерацию музыки...")
+                    await update.message.reply_text("🎼 Генерирую музыку через Suno API...")
                     
                     suno_result = await loop.run_in_executor(None, generate_music_with_suno, song_data)
                     
-                    if suno_result and suno_result.get('task_id'):
-                        task_id = suno_result['task_id']
-                        song_info = suno_result['song_data']
-                        
-                        # Отправляем информацию о начале генерации
+                    if suno_result and suno_result.get('data'):
+                        # Отправляем информацию о созданной музыке
                         await update.message.reply_text(
-                            f"🎵 <b>Музыка создается!</b>\n\n"
-                            f"Название: <b>{song_info['song_title']}</b>\n"
-                            f"Жанр: <b>{song_info['genre']}</b>\n"
-                            f"Настроение: <b>{song_info['mood']}</b>\n\n"
-                            f"⏳ Генерация займет 2-3 минуты.\n"
-                            f"Я автоматически отправлю готовую музыку в чат!",
+                            f"🎵 <b>Музыка создана!</b>\n\n"
+                            f"Название: <b>{song_data['song_title']}</b>\n"
+                            f"Жанр: <b>{song_data['genre']}</b>\n"
+                            f"Настроение: <b>{song_data['mood']}</b>\n\n"
+                            f"Музыка генерируется на серверах Suno. "
+                            f"Обычно это занимает 2-3 минуты.",
                             parse_mode='HTML'
                         )
-                        
-                        # Сохраняем информацию о задаче для последующей проверки
-                        if 'song_tasks' not in context.bot_data:
-                            context.bot_data['song_tasks'] = {}
-                        
-                        context.bot_data['song_tasks'][task_id] = {
-                            'chat_id': chat_id,
-                            'song_data': song_info,
-                            'timestamp': datetime.now()
-                        }
-                        
-                        # Запускаем автоматическую проверку через 3 минуты
-                        context.job_queue.run_once(
-                            check_song_automatically, 
-                            180,  # 3 минуты = 180 секунд
-                            data={'task_id': task_id, 'chat_id': chat_id}
-                        )
-                        
                     else:
-                        await update.message.reply_text("❌ Не удалось отправить запрос на генерацию музыки.")
+                        await update.message.reply_text("❌ Не удалось создать музыку через Suno API.")
                         
                 except Exception as e:
                     logger.error(f"Ошибка генерации музыки: {e}")
@@ -835,81 +813,6 @@ async def handle_song_generation(update: Update, context: ContextTypes.DEFAULT_T
         except:
             pass
 
-async def check_song_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /check_song для проверки статуса генерации песни"""
-    if not SONG_GENERATOR_AVAILABLE:
-        await update.message.reply_text("❌ Генератор песен недоступен")
-        return
-    
-    if not context.args:
-        await update.message.reply_text(
-            "🎵 Укажите ID задачи для проверки статуса\n\n"
-            "Пример: <code>/check_song task_id</code>",
-            parse_mode='HTML'
-        )
-        return
-    
-    task_id = context.args[0]
-    
-    try:
-        # Проверяем статус в отдельном потоке
-        import asyncio
-        loop = asyncio.get_event_loop()
-        
-        # Импортируем функцию проверки статуса
-        from song_generator import check_suno_task_status
-        
-        status_result = await loop.run_in_executor(None, check_suno_task_status, task_id)
-        
-        if status_result:
-            status = status_result.get('status', 'unknown')
-            
-            if status == 'complete':
-                # Музыка готова
-                audio_urls = status_result.get('audio_urls', [])
-                if audio_urls:
-                    await update.message.reply_text(
-                        f"🎵 <b>Музыка готова!</b>\n\n"
-                        f"Статус: <b>{status}</b>\n"
-                        f"Ссылки на аудио:\n"
-                        f"{chr(10).join([f'• {url}' for url in audio_urls])}",
-                        parse_mode='HTML'
-                    )
-                else:
-                    await update.message.reply_text(
-                        f"🎵 <b>Музыка готова!</b>\n\n"
-                        f"Статус: <b>{status}</b>\n"
-                        f"Но ссылки на аудио не найдены.",
-                        parse_mode='HTML'
-                    )
-            elif status == 'processing':
-                await update.message.reply_text(
-                    f"⏳ <b>Музыка создается...</b>\n\n"
-                    f"Статус: <b>{status}</b>\n"
-                    f"Попробуйте проверить еще раз через минуту.",
-                    parse_mode='HTML'
-                )
-            elif status == 'failed':
-                await update.message.reply_text(
-                    f"❌ <b>Ошибка генерации</b>\n\n"
-                    f"Статус: <b>{status}</b>\n"
-                    f"Попробуйте создать песню заново.",
-                    parse_mode='HTML'
-                )
-            else:
-                await update.message.reply_text(
-                    f"❓ <b>Неизвестный статус</b>\n\n"
-                    f"Статус: <b>{status}</b>\n"
-                    f"Попробуйте проверить позже.",
-                    parse_mode='HTML'
-                )
-        else:
-            await update.message.reply_text("❌ Не удалось получить статус задачи.")
-            
-    except Exception as e:
-        logger.error(f"Ошибка проверки статуса песни: {e}")
-        await update.message.reply_text("❌ Произошла ошибка при проверке статуса.")
-
 async def check_song_automatically(context: ContextTypes.DEFAULT_TYPE):
     """Автоматическая проверка готовности песни через 3 минуты"""
     job_data = context.job.data
@@ -926,20 +829,32 @@ async def check_song_automatically(context: ContextTypes.DEFAULT_TYPE):
         if status_result:
             status = status_result.get('status', 'unknown')
             
-            if status == 'complete':
+            if status == 'SUCCESS':
                 # Музыка готова - отправляем в чат
-                audio_urls = status_result.get('audio_urls', [])
                 song_info = context.bot_data.get('song_tasks', {}).get(task_id, {}).get('song_data', {})
                 
-                if audio_urls:
+                # Получаем данные о музыке из response
+                response_data = status_result.get('response', {})
+                suno_data = response_data.get('sunoData', [])
+                
+                if suno_data:
+                    # Формируем сообщение с информацией о треках
+                    message = f"🎵 <b>Музыка готова!</b> 🎵\n\n"
+                    message += f"Название: <b>{song_info.get('song_title', 'Песня дня')}</b>\n"
+                    message += f"Жанр: <b>{song_info.get('genre', 'Pop')}</b>\n"
+                    message += f"Настроение: <b>{song_info.get('mood', 'Happy')}</b>\n\n"
+                    message += f"🎼 <b>Создано треков: {len(suno_data)}</b>\n\n"
+                    
+                    for i, track in enumerate(suno_data, 1):
+                        message += f"🎵 <b>Трек {i}:</b>\n"
+                        message += f"   Длительность: {track.get('duration', 'N/A')} сек\n"
+                        message += f"   Модель: {track.get('modelName', 'N/A')}\n"
+                        message += f"   Аудио: {track.get('audioUrl', 'N/A')}\n"
+                        message += f"   Обложка: {track.get('imageUrl', 'N/A')}\n\n"
+                    
                     await context.bot.send_message(
                         chat_id=int(chat_id),
-                        text=f"🎵 <b>Музыка готова!</b> 🎵\n\n"
-                             f"Название: <b>{song_info.get('song_title', 'Песня дня')}</b>\n"
-                             f"Жанр: <b>{song_info.get('genre', 'Pop')}</b>\n"
-                             f"Настроение: <b>{song_info.get('mood', 'Happy')}</b>\n\n"
-                             f"Ссылки на аудио:\n"
-                             f"{chr(10).join([f'• {url}' for url in audio_urls])}",
+                        text=message,
                         parse_mode='HTML'
                     )
                 else:
@@ -949,7 +864,7 @@ async def check_song_automatically(context: ContextTypes.DEFAULT_TYPE):
                              f"Название: <b>{song_info.get('song_title', 'Песня дня')}</b>\n"
                              f"Жанр: <b>{song_info.get('genre', 'Pop')}</b>\n"
                              f"Настроение: <b>{song_info.get('mood', 'Happy')}</b>\n\n"
-                             f"Но ссылки на аудио не найдены.",
+                             f"Но данные о треках не найдены.",
                         parse_mode='HTML'
                     )
                 
@@ -957,10 +872,11 @@ async def check_song_automatically(context: ContextTypes.DEFAULT_TYPE):
                 if 'song_tasks' in context.bot_data and task_id in context.bot_data['song_tasks']:
                     del context.bot_data['song_tasks'][task_id]
                     
-            elif status == 'failed':
+            elif status in ['CREATE_TASK_FAILED', 'GENERATE_AUDIO_FAILED', 'CALLBACK_EXCEPTION', 'SENSITIVE_WORD_ERROR']:
                 await context.bot.send_message(
                     chat_id=int(chat_id),
-                    text="❌ <b>Ошибка генерации музыки</b>\n\n"
+                    text=f"❌ <b>Ошибка генерации музыки</b>\n\n"
+                         f"Статус: {status}\n"
                          "Попробуйте создать песню заново.",
                     parse_mode='HTML'
                 )
@@ -979,6 +895,7 @@ async def check_song_automatically(context: ContextTypes.DEFAULT_TYPE):
                 
         else:
             # Если не удалось получить статус, пробуем еще раз через минуту
+            logger.warning(f"Не удалось получить статус для задачи {task_id}")
             context.job_queue.run_once(
                 check_song_automatically, 
                 60,  # 1 минута
@@ -1253,7 +1170,6 @@ def main():
         application.add_handler(CommandHandler("topdate", topdate_command))
         application.add_handler(CommandHandler("q", chatgpt_query))
         application.add_handler(CommandHandler("photo", photo_command))
-        application.add_handler(CommandHandler("check_song", check_song_status))
         application.add_handler(InlineQueryHandler(inline_query))
         # Обработчик текстовых сообщений (включая кнопки и вопросы с "?")
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
