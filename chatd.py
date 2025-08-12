@@ -12,7 +12,14 @@ import pytz
 import re
 import uuid
 from director_analyzer import analyze_director_and_gift, format_gift_message
-from song_generator import analyze_chat_and_generate_song, generate_music_with_suno, check_suno_task_status, wait_for_suno_completion, format_song_message
+from song_generator import (
+    analyze_chat_and_generate_song,
+    generate_music_with_suno,
+    check_suno_task_status,
+    wait_for_suno_completion,
+    format_song_message,
+    create_song_from_user_request,
+)
 from director_photo_generator import generate_director_photo
 
 # Настройка логирования
@@ -169,9 +176,9 @@ def cleanup_chat_threads():
 def get_main_keyboard():
     """Создание основной клавиатуры с кнопками"""
     keyboard = [
-        ["📋 Итоги", "🏆 Топ дня", "📅 Топ 7д"],
+         ["📋 Итоги", "🏆 Топ дня", "📅 Топ 7д"],
         ["🤔 Че у вас тут происходит"],
-        ["🎁 Подарок", "🎵 Песня дня"]
+         ["🎁 Подарок", "🎵 Песня дня", "🎶 Заказать песню"]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -537,6 +544,57 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(message.chat_id)
     
     if message.text and not message.via_bot:
+        # Проверяем режим "заказать песню"
+        if context.user_data.get('custom_song_wait', {}).get(chat_id):
+            user_text = message.text.strip()
+            # Снимаем флаг ожидания
+            try:
+                context.user_data['custom_song_wait'].pop(chat_id, None)
+            except Exception:
+                pass
+
+            # Обрабатываем создание песни по запросу
+            await message.reply_text("🎼 Создаю текст и запускаю генерацию музыки...")
+            try:
+                import asyncio
+                loop = asyncio.get_event_loop()
+                song_data = await loop.run_in_executor(None, create_song_from_user_request, user_text)
+                if not song_data:
+                    await message.reply_text("❌ Не удалось создать песню по вашему запросу.")
+                    return
+
+                # Показываем описание
+                song_message = format_song_message(song_data)
+                await safe_send_message(update, song_message)
+
+                # Запускаем Suno
+                await asyncio.sleep(1)
+                await update.message.reply_text("🎤 Запускаю генерацию музыки в Suno...")
+                suno_result = await loop.run_in_executor(None, generate_music_with_suno, song_data)
+                if suno_result and suno_result.get('task_id'):
+                    task_id = suno_result['task_id']
+                    # Сохраняем задачу для авто-проверки
+                    if 'song_tasks' not in context.bot_data:
+                        context.bot_data['song_tasks'] = {}
+                    context.bot_data['song_tasks'][task_id] = {
+                        'song_data': song_data,
+                        'chat_id': chat_id,
+                    }
+                    # Планируем авто-проверку
+                    context.job_queue.run_once(
+                        check_song_automatically,
+                        180,
+                        data={'task_id': task_id, 'chat_id': chat_id}
+                    )
+                    await update.message.reply_text(
+                        "⏳ Музыка будет готова примерно через 2-3 минуты. Я пришлю ссылки автоматически.")
+                else:
+                    await update.message.reply_text("❌ Не удалось отправить задачу в Suno.")
+            except Exception as e:
+                logger.error(f"Ошибка при заказе песни: {e}")
+                await update.message.reply_text("❌ Ошибка при заказе песни. Попробуйте позже.")
+            return
+
         # Проверяем кнопки клавиатуры
         if message.text in ["📋 Итоги", "🏆 Топ дня", "📅 Топ 7д", "🤔 Че у вас тут происходит", "🎁 Подарок", "🎵 Песня дня"]:
             await handle_keyboard_buttons(update, context)
@@ -763,6 +821,16 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
         
     elif text == "🎵 Песня дня":
         await handle_song_generation(update, context)
+    
+    elif text == "🎶 Заказать песню":
+        await update.message.reply_text(
+            "🎶 Напишите тему или текст песни. Я создам текст и музыку (2-3 минуты).",
+            parse_mode='HTML'
+        )
+        # Маркируем чат в ожидании пользовательского ввода для заказа песни
+        if 'custom_song_wait' not in context.user_data:
+            context.user_data['custom_song_wait'] = {}
+        context.user_data['custom_song_wait'][chat_id] = True
 
 async def handle_director_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик генерации подарка для директора чата"""

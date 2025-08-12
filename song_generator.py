@@ -213,6 +213,70 @@ def analyze_chat_and_generate_song(message_store, chat_id):
         logger.error(f"Ошибка генерации песни: {e}")
         return None
 
+
+def create_song_from_user_request(user_text: str):
+    """
+    Создает song_data из ввода пользователя (тема или готовый текст).
+    1) Если введен короткий текст/тема — просим Claude написать полноценную песню
+    2) Если введен длинный текст — улучшаем через Claude
+    Возвращает dict в формате, совместимом с format_song_message и Suno.
+    """
+    try:
+        if not user_text or not user_text.strip():
+            return None
+
+        text = user_text.strip()
+
+        # По умолчанию жанр/настроение простые, чтобы не усложнять
+        genre = "Pop"
+        mood = "Energetic"
+
+        # Если есть Claude — используем его. Иначе берем как есть
+        if anthropic_client:
+            # Короткое задание → просим написать песню
+            if len(text) < 120 and "\n" not in text:
+                prompt = (
+                    "Ты поэт-песенник. Напиши полноценный текст песни по теме ниже. "
+                    "Соблюдай структуру: 2-3 куплета, припев (повторяющийся), возможно мост. "
+                    "Стиль: Pop, настроение: Energetic. Верни только текст без пояснений.\n\n"
+                    f"ТЕМА: {text}"
+                )
+                resp = anthropic_client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=1200,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                lyrics = resp.content[0].text.strip()
+            else:
+                # Длинный текст — улучшаем как в улучшайзере
+                lyrics = improve_song_lyrics_with_claude(text)
+        else:
+            # Нет Claude — берем исходный текст (или тему)
+            lyrics = text if len(text) > 40 else f"Песня на тему: {text}\n\n{text}"
+
+        # Заголовок берем из первой содержательной строки или делаем дефолт
+        first_line = next((ln.strip() for ln in lyrics.splitlines() if ln.strip()), "")
+        song_title = (first_line[:60] or "Песня на заказ").strip()
+
+        song_data = {
+            "song_title": song_title,
+            "genre": genre,
+            "mood": mood,
+            "lyrics": lyrics,
+            "description": "Песня, созданная по запросу пользователя",
+            "main_characters": [],
+            "key_events": [],
+            "style_prompt": f"{genre}, {mood}, современное звучание"
+        }
+
+        # Сохраняем улучшенный текст для отображения (если есть)
+        song_data["lyrics_improved"] = lyrics
+
+        return song_data
+    except Exception as e:
+        logger.error(f"Ошибка создания песни по запросу: {e}")
+        return None
+
 def generate_music_with_suno(song_data):
     """
     Генерирует музыку через Suno API на основе данных песни
