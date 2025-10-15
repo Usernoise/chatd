@@ -554,7 +554,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
 
             # Обрабатываем создание песни по запросу
-            await message.reply_text("🎼 Создаю текст и запускаю генерацию музыки...")
             try:
                 import asyncio
                 loop = asyncio.get_event_loop()
@@ -569,7 +568,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 # Запускаем Suno
                 await asyncio.sleep(1)
-                await update.message.reply_text("🎤 Запускаю генерацию музыки в Suno...")
                 suno_result = await loop.run_in_executor(None, generate_music_with_suno, song_data)
                 if suno_result and suno_result.get('task_id'):
                     task_id = suno_result['task_id']
@@ -586,8 +584,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         180,
                         data={'task_id': task_id, 'chat_id': chat_id}
                     )
-                    await update.message.reply_text(
-                        "⏳ Музыка будет готова примерно через 2-3 минуты. Я пришлю ссылки автоматически.")
                 else:
                     await update.message.reply_text("❌ Не удалось отправить задачу в Suno.")
             except Exception as e:
