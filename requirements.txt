@@ -4,3 +4,4 @@ replicate==1.0.7
 pytz==2025.2
 telethon==1.40.0
 anthropic==0.60.0
+python-dotenv==1.0.0
