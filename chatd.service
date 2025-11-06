@@ -1,0 +1,17 @@
+[Unit]
+Description=Telegram Chat Summarization Bot
+After=network.target
+
+[Service]
+Type=simple
+User=your_username
+WorkingDirectory=/path/to/chatd
+Environment="PATH=/path/to/chatd/venv/bin"
+ExecStart=/path/to/chatd/venv/bin/python /path/to/chatd/chatd.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/var/log/chatd/chatd.log
+StandardError=append:/var/log/chatd/chatd.error.log
+
+[Install]
+WantedBy=multi-user.target
