@@ -340,7 +340,7 @@ def generate_music_with_suno(song_data):
 
 def check_suno_task_status(task_id):
     """
-    Проверяет статус задачи генерации музыки
+    Проверяет статус задачи генерации музыки 
     """
     try:
         if not suno_api_key:
