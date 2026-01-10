@@ -37,6 +37,9 @@ wheels/
 venv/
 env/
 ENV/
+
+# Конфигурация
+.env
 config.py
 
 # IDE
@@ -49,4 +52,3 @@ config.py
 # OS
 .DS_Store
 Thumbs.db
-config.py

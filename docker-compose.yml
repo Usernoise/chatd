@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  chatd:
+    build: .
+    container_name: telegram-chatd-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Persist message store
+      - ./message_store.json:/app/message_store.json
+      # Persist generated photos
+      - ./generated_photos:/app/generated_photos
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

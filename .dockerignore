@@ -1,0 +1,47 @@
+# Git
+.git
+.gitignore
+.github
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+.env
+config.py
+message_store.json
+generated_photos/
+director_photos/
+*.log
+*.tmp
+nohup.out
+voice_message.oga
+*.backup_*
+
+# Documentation
+README.md
+chatd.service
+start.sh
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
